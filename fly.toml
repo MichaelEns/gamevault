@@ -1,0 +1,49 @@
+# Fly.io deployment.
+#   fly launch --no-deploy --copy-config
+#   fly volumes create gamevault_data --size 1
+#   fly secrets set GAMEVAULT_PASSWORD='...' ITAD_API_KEY='...' STEAM_API_KEY='...' STEAM_ID='...'
+#   fly deploy
+#
+# Fly terminates TLS for you, so the app is reached over HTTPS and the
+# session cookie is issued with the Secure flag.
+
+app = "gamevault"
+primary_region = "sea"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8787"
+  HOST = "0.0.0.0"
+  GAMEVAULT_DATA_DIR = "/data"
+  TRUST_PROXY = "true"
+
+[[mounts]]
+  source = "gamevault_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # Scale to zero when idle. A cold start costs a few seconds on the first
+  # request; for a tool you open at sale time that is the right trade.
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 40
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

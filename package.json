@@ -1,0 +1,31 @@
+{
+  "name": "gamevault",
+  "version": "1.0.0",
+  "description": "Do I already own this game, is it included in a subscription, and is this actually a good price?",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File setup.ps1",
+    "doctor": "node test/doctor.mjs",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File package.ps1",
+    "test": "node test/match.test.mjs && node test/deal.test.mjs && node test/auth.test.mjs && node test/manual.test.mjs && node test/subscriptions.test.mjs && node test/amazon.test.mjs && node test/merge.test.mjs && node test/snapshot-crypto.test.mjs",
+    "test:e2e": "node test/auth-e2e.test.mjs",
+    "hash-password": "node -e \"import('./lib/auth.mjs').then(m=>{const c=require('crypto');const p=c.randomBytes(18).toString('base64url');console.log('PASSWORD: '+p);console.log('HASH:     '+m.hashPassword(p))})\"",
+    "docker:build": "docker build -t gamevault:latest .",
+    "docker:up": "docker compose up -d",
+    "probe": "node test/live-probe.mjs",
+    "verify-subs": "node test/gp-verify.mjs",
+    "epic-auth": ".venv\\Scripts\\legendary auth",
+    "epic-status": ".venv\\Scripts\\legendary status",
+    "amazon-auth": ".venv\\Scripts\\nile auth --login",
+    "amazon-status": ".venv\\Scripts\\nile auth --status",
+    "icons": "node tools/make-icons.mjs",
+    "install-app": "powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1",
+    "snapshot": "node tools/build-snapshot.mjs",
+    "test:site": "node test/static-site.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

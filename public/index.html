@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GameVault &mdash; own it? good deal?</title>
+
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#10131a">
+<link rel="icon" href="/gamevault.ico" sizes="any">
+<link rel="icon" type="image/png" href="/icon-192.png">
+
+<!-- iOS home-screen behaviour: standalone chrome, dark status bar. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GameVault">
+<link rel="apple-touch-icon" href="/icon-180.png">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>GameVault</h1>
+  <p class="tag">Do I already own it &mdash; and is this actually a good price?</p>
+</header>
+
+<section class="bar">
+  <form id="searchForm">
+    <input id="q" type="search" placeholder="Search a game&hellip;" autocomplete="off"
+           autocapitalize="off" autocorrect="off" enterkeyhint="search">
+    <button type="submit">Search</button>
+  </form>
+  <div class="actions">
+    <button id="syncBtn" class="ghost">Sync library</button>
+    <button id="statusBtn" class="ghost">Status</button>
+    <button id="manualBtn" class="ghost">Manual library</button>
+    <button id="logoutBtn" class="ghost hidden">Sign out</button>
+  </div>
+</section>
+
+<div id="notice" class="notice hidden"></div>
+<div id="status" class="panel hidden"></div>
+<div id="manual" class="panel hidden"></div>
+<div id="results"></div>
+
+<footer>
+  <span id="sources"></span>
+</footer>
+
+<script src="/app.js" type="module"></script>
+<script>
+  // Only register the service worker on a secure origin. Safari refuses on
+  // plain http (localhost excepted), and a failed registration is noisy.
+  if ('serviceWorker' in navigator &&
+      (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>

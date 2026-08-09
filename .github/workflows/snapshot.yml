@@ -1,0 +1,114 @@
+name: Build snapshot and publish
+
+# Why a snapshot rather than a live server:
+# Steam, GOG, Game Pass and ITAD all refuse cross-origin browser requests,
+# and API keys must never reach client-side code. So the work happens here,
+# where secrets are safe, and the phone reads a static encrypted file.
+
+on:
+  schedule:
+    # Every 6 hours. Ownership and subscription data barely move; prices are
+    # the volatile part, and the app labels how old they are.
+    # Note: cron on public repos is best-effort and can be delayed under
+    # load, which is why workflow_dispatch exists.
+    - cron: '0 */6 * * *'
+  workflow_dispatch:        # manual trigger - works from the GitHub mobile app
+  push:
+    branches: [main]
+    paths:
+      - 'watchlist.txt'     # rebuild immediately when the watchlist changes
+      - 'lib/**'
+      - 'site/**'
+      - 'tools/build-snapshot.mjs'
+      - '.github/workflows/snapshot.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two builds publish at once.
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Optional: Epic and Amazon ownership.
+      # These CLIs cannot do a browser login in CI, so their tokens are
+      # restored from secrets. Skipped cleanly when the secrets are absent -
+      # every other provider still works.
+      - name: Restore game-client tokens
+        env:
+          LEGENDARY_CONFIG: ${{ secrets.LEGENDARY_CONFIG }}
+          NILE_CONFIG: ${{ secrets.NILE_CONFIG }}
+        run: |
+          if [ -n "$LEGENDARY_CONFIG" ]; then
+            mkdir -p ~/.config/legendary
+            echo "$LEGENDARY_CONFIG" | base64 -d > ~/.config/legendary/user.json
+            pip install --user legendary-gl || true
+            echo "GAMEVAULT_LEGENDARY_BIN=$HOME/.local/bin/legendary" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$NILE_CONFIG" ]; then
+            mkdir -p ~/.config/nile
+            echo "$NILE_CONFIG" | base64 -d > ~/.config/nile/user.json
+            pip install --user "git+https://github.com/imLinguin/nile.git" || true
+            echo "GAMEVAULT_NILE_BIN=$HOME/.local/bin/nile" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build snapshot
+        env:
+          # Required for a public repo. Without it the build writes
+          # plaintext and warns loudly.
+          SNAPSHOT_PASSPHRASE: ${{ secrets.SNAPSHOT_PASSPHRASE }}
+          # Pricing and historical lows.
+          ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+          # Ownership.
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          STEAM_ID: ${{ secrets.STEAM_ID }}
+          ITCH_API_KEY: ${{ secrets.ITCH_API_KEY }}
+          # Which Game Pass tier you actually pay for. Getting this wrong
+          # makes the app claim a console-only game is "included".
+          SUBSCRIPTIONS: ${{ vars.SUBSCRIPTIONS }}
+          COUNTRY: ${{ vars.COUNTRY || 'US' }}
+        run: node tools/build-snapshot.mjs
+
+      - name: Fail if the snapshot is unencrypted
+        # A plaintext library in a public repo is the one outcome this
+        # design must never produce silently.
+        run: |
+          if grep -q '"format":"gamevault-plain-snapshot"' site/snapshot.json; then
+            echo "::error::Snapshot is NOT encrypted. Set the SNAPSHOT_PASSPHRASE secret."
+            exit 1
+          fi
+          echo "Snapshot is encrypted."
+
+      - name: Copy PWA assets
+        run: |
+          cp public/icon-180.png public/icon-192.png public/icon-512.png \
+             public/icon-maskable.png public/style.css site/
+          cp public/manifest.webmanifest public/sw.js site/
+          cp lib/snapshot-crypto.mjs site/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

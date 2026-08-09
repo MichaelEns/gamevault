@@ -1,0 +1,37 @@
+services:
+  gamevault:
+    build: .
+    image: gamevault:latest
+    container_name: gamevault
+    restart: unless-stopped
+    ports:
+      # Bind to loopback only. Put a reverse proxy (Caddy/nginx/Cloudflare
+      # Tunnel) in front for TLS rather than exposing this port directly.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - gamevault-data:/data
+    environment:
+      GAMEVAULT_DATA_DIR: /data
+
+      # REQUIRED once this is reachable from anywhere but localhost.
+      # The app refuses to start on 0.0.0.0 without it.
+      GAMEVAULT_PASSWORD: ${GAMEVAULT_PASSWORD:?set GAMEVAULT_PASSWORD in a .env file next to this compose file}
+
+      # Deal quality -- the highest-value key.
+      ITAD_API_KEY: ${ITAD_API_KEY:-}
+
+      # Ownership (all optional).
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      STEAM_ID: ${STEAM_ID:-}
+      ITCH_API_KEY: ${ITCH_API_KEY:-}
+
+      # Ubisoft is intentionally omitted here. It needs your real account
+      # password, and an env var on a remote host is a materially worse
+      # place for that than your own PC. Sync Ubisoft locally instead --
+      # see "Ubisoft in the cloud" in the README.
+
+      COUNTRY: ${COUNTRY:-US}
+      TRUST_PROXY: "true"
+
+volumes:
+  gamevault-data:

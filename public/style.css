@@ -1,0 +1,193 @@
+:root {
+  --bg: #10131a;
+  --panel: #171b24;
+  --panel2: #1e2430;
+  --line: #2a3242;
+  --text: #e6e9ef;
+  --dim: #98a2b3;
+  --accent: #6ea8ff;
+
+  --owned: #8b5cf6;
+  --included: #22c55e;
+  --best: #16a34a;
+  --good: #65a30d;
+  --meh: #ca8a04;
+  --wait: #ef4444;
+  --unknown: #64748b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+header { padding: 28px 24px 8px; }
+h1 { margin: 0; font-size: 26px; letter-spacing: -0.4px; }
+.tag { margin: 4px 0 0; color: var(--dim); font-size: 14px; }
+
+.bar {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 16px 24px 20px;
+}
+#searchForm { display: flex; gap: 8px; flex: 1 1 460px; }
+input[type=search] {
+  flex: 1; padding: 11px 14px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-size: 15px;
+}
+input[type=search]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+button {
+  padding: 11px 18px; border-radius: 8px; border: 1px solid transparent;
+  background: var(--accent); color: #08111f; font-weight: 650; cursor: pointer;
+  font-size: 14px;
+}
+button:hover { filter: brightness(1.08); }
+button.ghost { background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; }
+button:disabled { opacity: .55; cursor: default; }
+.actions { display: flex; gap: 8px; }
+
+.notice {
+  margin: 0 24px 16px; padding: 12px 14px; border-radius: 8px;
+  background: #2a1f12; border: 1px solid #6b4a1d; color: #f3d9b0; font-size: 14px;
+}
+.notice.err { background: #2b1416; border-color: #7f2a30; color: #f6c9cd; }
+.hidden { display: none; }
+
+.panel {
+  margin: 0 24px 18px; padding: 14px 16px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line); font-size: 14px;
+}
+.panel h3 { margin: 0 0 10px; font-size: 14px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+.panel .row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid #222a37; }
+.panel .row:last-child { border-bottom: 0; }
+.panel .ok { color: #4ade80; }
+.panel .no { color: #fca5a5; }
+
+#results { padding: 0 24px 40px; display: grid; gap: 12px; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-left: 5px solid var(--unknown); border-radius: 10px; padding: 14px 16px;
+}
+.card.v-owned { border-left-color: var(--owned); }
+.card.v-included { border-left-color: var(--included); }
+.card.v-free, .card.v-best-ever, .card.v-matches-low { border-left-color: var(--best); }
+.card.v-near-low, .card.v-good { border-left-color: var(--good); }
+.card.v-meh { border-left-color: var(--meh); }
+.card.v-wait, .card.v-full-price { border-left-color: var(--wait); }
+
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.title { font-size: 17px; font-weight: 650; margin: 0; }
+
+.verdict {
+  font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  background: #232b3a; color: var(--text);
+}
+.v-owned .verdict { background: #3b2a63; color: #d8c9ff; }
+.v-included .verdict { background: #123a24; color: #a7f3c9; }
+.v-free .verdict, .v-best-ever .verdict, .v-matches-low .verdict { background: #10391f; color: #b3f0c6; }
+.v-near-low .verdict, .v-good .verdict { background: #2b3512; color: #dbf0a8; }
+.v-meh .verdict { background: #3a2f0c; color: #f3dfa0; }
+.v-wait .verdict, .v-full-price .verdict { background: #3b1618; color: #f9c3c6; }
+
+.reason { color: var(--dim); margin: 7px 0 0; font-size: 14px; }
+
+.badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.badge {
+  font-size: 12px; padding: 3px 9px; border-radius: 6px;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--dim);
+}
+.badge.own { background: #2e2350; border-color: #4c3a86; color: #d8c9ff; }
+.badge.sub { background: #12301f; border-color: #1f5c39; color: #a7f3c9; }
+
+.prices { margin-top: 12px; display: grid; gap: 4px; }
+.price-row {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+  padding: 5px 8px; border-radius: 6px; background: #141924; font-size: 14px;
+}
+.price-row.cheapest { background: #16241a; }
+.shop { color: var(--dim); }
+.amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.cut { color: #86efac; font-variant-numeric: tabular-nums; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.lowline { margin-top: 8px; font-size: 13px; color: var(--dim); }
+footer { padding: 0 24px 30px; color: #5c6675; font-size: 12px; }
+.spin { color: var(--dim); padding: 10px 24px; }
+
+/* ---------- iPhone / small screens ----------
+   The PWA is opened one-handed at a store page, so touch targets follow the
+   44px iOS minimum and the safe-area insets keep content clear of the notch
+   and home indicator when running standalone. */
+@supports (padding: max(0px)) {
+  body {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  header { padding-top: max(28px, calc(env(safe-area-inset-top) + 12px)); }
+}
+
+@media (max-width: 620px) {
+  header { padding: 18px 16px 4px; }
+  h1 { font-size: 22px; }
+  .tag { font-size: 13px; }
+
+  .bar { padding: 12px 16px 14px; gap: 10px; }
+  #searchForm { flex: 1 1 100%; }
+  input[type=search] {
+    font-size: 16px;            /* < 16px makes iOS Safari zoom on focus */
+    padding: 13px 14px;
+  }
+  button { padding: 13px 16px; min-height: 44px; }
+
+  .actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .actions button { width: 100%; }
+
+  #results { padding: 0 16px 32px; }
+  .notice, .panel { margin-left: 16px; margin-right: 16px; }
+
+  .card { padding: 13px 14px; }
+  .card-head { gap: 8px; }
+  .title { font-size: 16px; }
+  .verdict { font-size: 11px; padding: 3px 8px; }
+  .reason { font-size: 13px; }
+
+  /* Price rows stay readable when the shop name is long. */
+  .price-row { grid-template-columns: 1fr auto auto; gap: 8px; font-size: 13px; }
+
+  footer { padding: 0 16px 24px; word-break: break-word; }
+}
+
+/* Standalone (installed) mode: drop the strapline to save vertical space. */
+@media (display-mode: standalone) {
+  .tag { display: none; }
+  header { padding-bottom: 0; }
+}
+
+/* Respect the OS light theme rather than forcing dark on a bright phone. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel2: #eef1f5;
+    --line: #d6dbe3;
+    --text: #131720;
+    --dim: #5b6472;
+  }
+  .price-row { background: #eef1f5; }
+  .price-row.cheapest { background: #e4f3e8; }
+  button { color: #08111f; }
+}

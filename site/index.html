@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GameVault</title>
+
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#10131a">
+<link rel="icon" type="image/png" href="./icon-192.png">
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GameVault">
+<link rel="apple-touch-icon" href="./icon-180.png">
+
+<link rel="stylesheet" href="./style.css">
+<style>
+  .unlock-wrap { max-width: 380px; margin: 10vh auto; padding: 0 20px; }
+  .unlock-card { background: var(--panel); border: 1px solid var(--line);
+                 border-radius: 12px; padding: 26px; }
+  .unlock-card h1 { font-size: 22px; margin: 0 0 4px; }
+  .unlock-card p { color: var(--dim); font-size: 14px; margin: 0 0 18px; }
+  .unlock-card input { width: 100%; padding: 13px 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    font-size: 16px; }
+  .unlock-card button { width: 100%; margin-top: 12px; padding: 13px; }
+  .err { color: #fca5a5; font-size: 14px; margin-top: 12px; min-height: 20px; }
+  .freshness { font-size: 12px; color: var(--dim); margin-top: 14px; text-align: center; }
+  .stale { color: #f3dfa0; }
+  .very-stale { color: #fca5a5; }
+</style>
+</head>
+<body>
+
+<div id="lock" class="unlock-wrap">
+  <div class="unlock-card">
+    <h1>GameVault</h1>
+    <p>Enter your passphrase to unlock your library.</p>
+    <form id="unlockForm">
+      <input id="pass" type="password" placeholder="Passphrase"
+             autocomplete="current-password" autocapitalize="off" autocorrect="off">
+      <button type="submit">Unlock</button>
+    </form>
+    <div class="err" id="unlockErr"></div>
+    <div class="freshness" id="freshness"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>GameVault</h1>
+    <p class="tag" id="tag"></p>
+  </header>
+
+  <section class="bar">
+    <form id="searchForm">
+      <input id="q" type="search" placeholder="Search your library&hellip;" autocomplete="off"
+             autocapitalize="off" autocorrect="off" enterkeyhint="search">
+      <button type="submit">Search</button>
+    </form>
+    <div class="actions">
+      <button id="lockBtn" class="ghost">Lock</button>
+    </div>
+  </section>
+
+  <div id="notice" class="notice hidden"></div>
+  <div id="results"></div>
+  <footer><span id="sources"></span></footer>
+</div>
+
+<script src="./app-static.js" type="module"></script>
+<script>
+  if ('serviceWorker' in navigator &&
+      (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>

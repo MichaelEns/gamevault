@@ -1,0 +1,11 @@
+# Watchlist — games you want price + deal data for but may not own.
+#
+# The snapshot always prices everything you already own. Add anything here
+# that you are WAITING to buy, so the deal verdict is ready when a sale hits.
+#
+# One title per line. Blank lines and #comments are ignored.
+# Editing this file triggers a rebuild on push.
+
+# Elden Ring
+# Baldur's Gate 3
+# Silksong
