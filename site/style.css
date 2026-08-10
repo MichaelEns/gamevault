@@ -191,3 +191,28 @@ footer { padding: 0 24px 30px; color: #5c6675; font-size: 12px; }
   .price-row.cheapest { background: #e4f3e8; }
   button { color: #08111f; }
 }
+
+/* ---------- Sources / setup panel ---------- */
+.setup-title { font-size: 16px; margin: 18px 0 6px; }
+.setup-intro, .setup-foot {
+  font-size: 13px; color: var(--dim); line-height: 1.5; margin: 0 0 14px;
+}
+.setup-foot { margin-top: 14px; }
+.src {
+  border: 1px solid #22262f; border-left-width: 3px;
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+  background: #161a22;
+}
+.src.ok   { border-left-color: #3fb950; }
+.src.warn { border-left-color: #d29922; }
+.src.off  { border-left-color: #444b57; }
+.src-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.src-badge { font-size: 12px; color: var(--dim); white-space: nowrap; }
+.src.ok .src-badge { color: #3fb950; }
+.src-unlocks { font-size: 13px; margin: 4px 0 6px; }
+.src-note { font-size: 12px; color: var(--dim); margin: 6px 0 0; line-height: 1.45; }
+.src-links { font-size: 13px; margin: 8px 0 0; }
+.src code {
+  font-size: 11px; background: #0e1117; border: 1px solid #22262f;
+  border-radius: 4px; padding: 1px 5px; margin-right: 4px;
+}

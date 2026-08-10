@@ -24,7 +24,7 @@ import * as itad from '../lib/itad.mjs';
 import * as steam from '../lib/steam.mjs';
 import * as gog from '../lib/gog.mjs';
 import * as nintendo from '../lib/nintendo.mjs';
-import { syncLibrary, loadLibrary } from '../lib/library.mjs';
+import { syncLibrary, loadLibrary, providerStatus } from '../lib/library.mjs';
 
 const OUT_DIR = path.join(PATHS.root, 'site');
 const ENV = process.env;
@@ -173,12 +173,19 @@ async function main() {
   log(`${Object.keys(verdicts).length} verdicts computed`);
 
   // ---- 5. Assemble -------------------------------------------------------
+  // Which providers are wired up, so the app can explain an empty library
+  // instead of just showing "0 games owned". This goes INSIDE the encrypted
+  // payload -- it names the services you use, which is nobody else's
+  // business on a public repo.
+  const providers = await providerStatus(ENV).catch(() => ({}));
+
   const snapshot = {
     builtAt: new Date().toISOString(),
     country: COUNTRY,
     entitled: entitled.keys,
     entitledAssumed: entitled.assumed,
     stores,
+    providers,
     // The index maps normalised title -> where you own it.
     index: library.index ?? {},
     subs,

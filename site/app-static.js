@@ -16,6 +16,56 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
 
 let SNAP = null;
 
+const REPO = 'MichaelEns/gamevault';
+const SECRETS_URL = `https://github.com/${REPO}/settings/secrets/actions`;
+const VARS_URL = `https://github.com/${REPO}/settings/variables/actions`;
+
+const SOURCES = [
+  {
+    key: 'steam', label: 'Steam', unlocks: 'Everything you own on Steam',
+    needs: ['STEAM_API_KEY', 'STEAM_ID'],
+    get: 'https://steamcommunity.com/dev/apikey',
+    hint: 'Free key. Your profile\u2019s "Game details" must be set to Public, ' +
+          'or Steam returns an empty list rather than an error.',
+  },
+  {
+    key: 'itad', label: 'Prices & historical lows', unlocks: 'Is this actually a good price?',
+    needs: ['ITAD_API_KEY'],
+    get: 'https://isthereanydeal.com/apps/my/',
+    hint: 'Highest value single key: without it there are no prices at all, ' +
+          'so every verdict is ownership-only.',
+    variable: false,
+  },
+  {
+    key: 'itch', label: 'itch.io', unlocks: 'Your itch.io purchases and bundles',
+    needs: ['ITCH_API_KEY'],
+    get: 'https://itch.io/user/settings/api-keys',
+  },
+  {
+    key: 'epic', label: 'Epic Games', unlocks: 'Your Epic library',
+    needs: ['LEGENDARY_CONFIG'],
+    get: null,
+    hint: 'Run "npm run epic-auth" on a PC, then paste the resulting ' +
+          'config into the LEGENDARY_CONFIG secret. Epic has no public ' +
+          'library API, so this borrows a real client\u2019s login.',
+  },
+  {
+    key: 'amazon', label: 'Prime Gaming', unlocks: 'Games claimed with Prime',
+    needs: ['NILE_CONFIG'],
+    get: null,
+    hint: 'Run "npm run amazon-auth" on a PC and paste the config. ' +
+          'Amazon Luna is not possible \u2014 its client only talks to ' +
+          'internal amazon hosts that do not resolve publicly.',
+  },
+  {
+    key: 'nintendo', label: 'Nintendo', unlocks: 'eShop prices (ownership is manual)',
+    needs: [],
+    get: null,
+    hint: 'Nintendo exposes no purchase-history API. Prices work; ' +
+          'ownership has to be typed into the manual library.',
+  },
+];
+
 /**
  * "Remember on this device".
  *
@@ -79,6 +129,13 @@ async function unlockWith(passphrase) {
     showNotice(`Prices are from ${age.label}. Ownership and subscription info stays accurate; ` +
                `a sale that started since then will not show.`);
   }
+  // An empty library is almost always a missing key, not a real answer.
+  // Say so at the moment it matters instead of silently returning nothing.
+  if ((SNAP.counts.owned ?? 0) === 0) {
+    showNotice('No ownership data yet — subscription lookups still work. ' +
+               'Open Sources to connect Steam and the rest.');
+    renderSetup();
+  }
   $('#q').focus();
 }
 
@@ -128,8 +185,84 @@ $('#lockBtn').addEventListener('click', () => {
   $('#remember').checked = false;
   $('#results').innerHTML = '';
   $('#q').value = '';
+  $('#setup').classList.add('hidden');
   $('#app').classList.add('hidden');
   $('#lock').classList.remove('hidden');
+});
+
+/* ---------- Sources panel ----------
+ *
+ * Answers "why does this say 0 games owned?" without making you read the
+ * repo. Each entry links straight to the page that issues the credential
+ * and to the GitHub secret form that consumes it.
+ *
+ * Note what this panel deliberately does NOT do: log you in. Steam, GOG and
+ * ITAD send no Access-Control-Allow-Origin header, so a browser cannot read
+ * their responses from this origin no matter how it authenticates. That is
+ * the same constraint that made this a nightly-snapshot app instead of a
+ * live one. The credential has to be handed to the GitHub Action, which is
+ * not a browser and is not subject to CORS.
+ */
+
+
+function renderSetup() {
+  const box = $('#setup');
+  const prov = SNAP?.providers ?? {};
+  const stores = SNAP?.stores ?? {};
+
+  const rows = SOURCES.map((s) => {
+    const p = prov[s.key] ?? {};
+    const st = stores[s.key];
+    // "Configured" comes from the builder; the store record proves it worked.
+    const live = st && st.ok !== false && (st.count ?? 0) > 0;
+    const state = live ? 'ok' : (p.configured ? 'warn' : 'off');
+    const badge = live ? `${st.count} titles`
+                : p.configured ? 'configured, nothing synced'
+                : 'not connected';
+    const note = st?.error ? `Last sync failed: ${st.error}`
+               : (p.note && p.note !== 'ready' ? p.note : s.hint ?? '');
+
+    const links = [];
+    if (s.get) links.push(`<a href="${s.get}" target="_blank" rel="noopener">Get key</a>`);
+    if (s.needs.length) links.push(`<a href="${SECRETS_URL}" target="_blank" rel="noopener">Add secret</a>`);
+
+    return `<div class="src ${state}">
+      <div class="src-head">
+        <strong>${esc(s.label)}</strong>
+        <span class="src-badge">${esc(badge)}</span>
+      </div>
+      <div class="src-body">
+        <div class="src-unlocks">${esc(s.unlocks)}</div>
+        ${s.needs.length ? `<code>${s.needs.map(esc).join('</code> <code>')}</code>` : ''}
+        ${note ? `<p class="src-note">${esc(note)}</p>` : ''}
+        ${links.length ? `<p class="src-links">${links.join(' · ')}</p>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <h2 class="setup-title">Where your data comes from</h2>
+    <p class="setup-intro">
+      Keys go to the GitHub Action that builds your snapshot, not to this page.
+      Steam, GOG and IsThereAnyDeal all refuse cross-origin browser requests,
+      so signing in here could not fetch your library even if it were offered
+      &mdash; that restriction is on the browser origin, not on the login.
+    </p>
+    ${rows}
+    <p class="setup-foot">
+      Subscriptions: <a href="${VARS_URL}" target="_blank" rel="noopener">SUBSCRIPTIONS variable</a>
+      (currently <code>${esc((SNAP?.entitled ?? []).join(', ') || 'none')}</code>).
+      After changing anything, run the
+      <a href="https://github.com/${REPO}/actions" target="_blank" rel="noopener">snapshot workflow</a>
+      to rebuild.
+    </p>`;
+  box.classList.remove('hidden');
+}
+
+$('#setupBtn').addEventListener('click', () => {
+  const box = $('#setup');
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  renderSetup();
 });
 
 function showNotice(msg) {
