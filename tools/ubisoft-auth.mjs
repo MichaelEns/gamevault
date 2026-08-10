@@ -20,6 +20,7 @@
  * endpoints and header names around, and a silent failure here would be
  * indistinguishable from a wrong password.
  */
+import { writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { stdin, stdout } from 'node:process';
 
@@ -31,6 +32,20 @@ const APP_ID = 'f68a4bb5-608a-4ff2-8123-be8ef797e0a6';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
            '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+/**
+ * Hand the credential back to a caller through a file.
+ *
+ * finish-setup.ps1 used to scrape this value out of stdout, which meant
+ * piping the tool's output - and a piped stream buffers, so the prompts
+ * below never reached the screen and the script appeared to hang while
+ * silently waiting for input. Writing to a file lets the tool own the
+ * console, which is the only way an interactive prompt works.
+ */
+function emit(value) {
+  const i = process.argv.indexOf('--out');
+  if (i === -1 || !process.argv[i + 1]) return;
+  writeFileSync(process.argv[i + 1], value, 'utf8');
+}
 function ask(question, { hidden = false } = {}) {
   return new Promise((resolve) => {
     const rl = createInterface({ input: stdin, output: stdout, terminal: true });
@@ -113,5 +128,6 @@ if (!session?.rememberMeTicket) {
 console.log('\nSigned in as ' + (session.nameOnPlatform ?? 'unknown'));
 console.log('\nAdd this as the UBISOFT_REMEMBER_TICKET secret:\n');
 console.log(session.rememberMeTicket);
+emit(session.rememberMeTicket);
 console.log('\nThen DELETE the UBISOFT_PASSWORD secret - it is no longer needed,');
 console.log('and this ticket can be revoked from Ubisoft account security.');

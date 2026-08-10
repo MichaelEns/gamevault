@@ -16,10 +16,25 @@
  * it, so a mistyped copy fails now rather than silently producing an empty
  * library later.
  */
+import { writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { stdin, stdout } from 'node:process';
 import * as ea from '../lib/ea.mjs';
 
+/**
+ * Hand the credential back to a caller through a file.
+ *
+ * finish-setup.ps1 used to scrape this value out of stdout, which meant
+ * piping the tool's output - and a piped stream buffers, so the prompts
+ * below never reached the screen and the script appeared to hang while
+ * silently waiting for input. Writing to a file lets the tool own the
+ * console, which is the only way an interactive prompt works.
+ */
+function emit(value) {
+  const i = process.argv.indexOf('--out');
+  if (i === -1 || !process.argv[i + 1]) return;
+  writeFileSync(process.argv[i + 1], value, 'utf8');
+}
 function ask(question) {
   return new Promise((resolve) => {
     const rl = createInterface({ input: stdin, output: stdout });
@@ -62,6 +77,7 @@ try {
 
   console.log('\nAdd this as the EA_REMID secret:\n');
   console.log(remid);
+  emit(remid);
   console.log('\nIt is a long-lived cookie, but not permanent. If EA ownership');
   console.log('stops updating, run this again to refresh it.');
 } catch (e) {

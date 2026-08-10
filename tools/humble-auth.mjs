@@ -12,10 +12,25 @@
  * purchases invisible in Steam or anywhere else, and they are the whole reason
  * this source is worth having.
  */
+import { writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { stdin, stdout } from 'node:process';
 import * as humble from '../lib/humble.mjs';
 
+/**
+ * Hand the credential back to a caller through a file.
+ *
+ * finish-setup.ps1 used to scrape this value out of stdout, which meant
+ * piping the tool's output - and a piped stream buffers, so the prompts
+ * below never reached the screen and the script appeared to hang while
+ * silently waiting for input. Writing to a file lets the tool own the
+ * console, which is the only way an interactive prompt works.
+ */
+function emit(value) {
+  const i = process.argv.indexOf('--out');
+  if (i === -1 || !process.argv[i + 1]) return;
+  writeFileSync(process.argv[i + 1], value, 'utf8');
+}
 function ask(question) {
   return new Promise((resolve) => {
     const rl = createInterface({ input: stdin, output: stdout });
@@ -62,6 +77,7 @@ try {
 
   console.log('\nAdd this as the HUMBLE_SESSION secret:\n');
   console.log(session);
+  emit(session);
   console.log('\nHumble sessions expire after a while. If Humble stops updating,');
   console.log('run this again to refresh it.');
 } catch (e) {

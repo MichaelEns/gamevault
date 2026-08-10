@@ -202,6 +202,22 @@ footer { padding: 0 24px 30px; color: var(--dim); font-size: 12px; }
 }
 #ptr span { padding-bottom: 10px; }
 
+/* ---------- free to keep ----------
+ * Deliberately prominent: these expire, so a quiet presentation would defeat
+ * the purpose. Uses theme variables like everything else. */
+#freebies {
+  border: 1px solid var(--line); border-left: 3px solid var(--included);
+  border-radius: 8px; padding: 12px 14px; margin: 0 24px 16px;
+  background: var(--panel); color: var(--text);
+}
+.free-title { font-size: 15px; margin: 0 0 8px; color: var(--text); }
+.free-list { list-style: none; margin: 0; padding: 0; }
+.free-list li { padding: 5px 0; font-size: 14px; }
+.free-list a { color: var(--link); font-weight: 600; }
+.free-time { color: var(--dim); font-size: 12px; margin-left: 8px; }
+.free-note { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
+.free-foot { color: var(--dim); font-size: 12px; margin: 8px 0 0; }
+
 /* ---------- Sources / setup panel ----------
  *
  * Uses the theme variables, never literal colours. An earlier version

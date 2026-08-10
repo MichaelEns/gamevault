@@ -195,12 +195,26 @@ function Set-Secret {
 # as "sign-in did not complete" when in fact it did.
 function Find-ClientConfig {
     param([string] $Client)
+    # Fast paths first.
     foreach ($c in @(
         (Join-Path $env:USERPROFILE ".config\$Client\user.json"),
         (Join-Path $env:LOCALAPPDATA "$Client\user.json"),
         (Join-Path $env:APPDATA "$Client\user.json"),
-        (Join-Path $env:LOCALAPPDATA "$Client\$Client\user.json")
+        (Join-Path $env:LOCALAPPDATA "$Client\$Client\user.json"),
+        (Join-Path $env:APPDATA "$Client\$Client\user.json")
     )) { if (Test-Path $c) { return $c } }
+
+    # Then look properly. Both clients use Python's platformdirs, which picks a
+    # different layout per platform and per version, so a fixed list of guesses
+    # WILL eventually be wrong - and reporting "sign-in did not complete" after
+    # a sign-in that plainly succeeded is the worst way to be wrong.
+    foreach ($base in @($env:APPDATA, $env:LOCALAPPDATA, (Join-Path $env:USERPROFILE '.config'))) {
+        if (-not $base -or -not (Test-Path $base)) { continue }
+        $hit = Get-ChildItem -Path $base -Filter 'user.json' -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+               Where-Object { $_.DirectoryName -match [regex]::Escape($Client) } |
+               Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
     return $null
 }
 
@@ -313,46 +327,46 @@ if (& $want 'amazon') {
 
 <#
 .SYNOPSIS
-  Run an interactive auth tool and capture the credential it prints.
+  Run an interactive auth tool and collect the credential it produces.
 .DESCRIPTION
-  Each tool ends by printing a heading and then the value on its own line.
-  Scraping stdout is unavoidable here because the tools are interactive, but
-  the value is validated before use: too short, or containing whitespace, means
-  the heading was matched but the value was not, and saving that would store
-  a broken secret that fails silently at the next build.
+  The tool's output is NOT piped or captured. Piping it - even through
+  Tee-Object - buffers the stream, so the tool's prompts never reach the
+  screen and the script looks frozen while it silently waits for input that
+  the user has no way to know is expected.
+
+  The credential therefore comes back through a file rather than by scraping
+  stdout, which is also sturdier: no marker matching, no blank-line hunting,
+  and no risk of storing a heading as if it were a secret.
 #>
 function Invoke-AuthTool {
     param(
         [Parameter(Mandatory)][string] $Script,
-        [Parameter(Mandatory)][string] $Marker,
         [Parameter(Mandatory)][string] $SecretName
     )
+    $outFile = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-" + [guid]::NewGuid().ToString('N') + '.txt')
     Push-Location $root
     try {
         $prev = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        # Not redirected: these tools prompt, so the user must see them live.
-        $out = & node $Script 2>&1 | Tee-Object -Variable shown
+        # No redirection and no pipeline: the tool owns the console so its
+        # prompts appear and its input works.
+        & node $Script --out $outFile
         $ErrorActionPreference = $prev
 
-        $lines = @($out | ForEach-Object { $_.ToString() })
-        $idx = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match [regex]::Escape($Marker)) { $idx = $i; break }
+        if (-not (Test-Path $outFile)) {
+            Warn "The sign-in did not complete, so no $SecretName was produced."
+            return $null
         }
-        if ($idx -lt 0) { Warn 'The sign-in did not complete.'; return $null }
-
-        $value = $null
-        for ($i = $idx + 1; $i -lt $lines.Count; $i++) {
-            $candidate = $lines[$i].Trim()
-            if ($candidate) { $value = $candidate; break }
-        }
-        if (-not $value -or $value.Length -lt 20 -or $value -match '\s') {
-            Warn "Could not read a usable $SecretName from the output."
+        $value = (Get-Content $outFile -Raw).Trim()
+        if (-not $value -or $value.Length -lt 20) {
+            Warn "The $SecretName looked wrong (too short), so it was not saved."
             return $null
         }
         return $value
-    } finally { Pop-Location }
+    } finally {
+        Remove-Item $outFile -Force -ErrorAction SilentlyContinue
+        Pop-Location
+    }
 }
 
 # --- Ubisoft ---------------------------------------------------------------
@@ -367,7 +381,7 @@ if (& $want 'ubisoft') {
         Info 'You will be asked for your password and a 2FA code.'
         Info 'The password is used once here and never stored.'
 
-        $ticket = Invoke-AuthTool 'tools/ubisoft-auth.mjs' 'UBISOFT_REMEMBER_TICKET secret' 'ticket'
+        $ticket = Invoke-AuthTool 'tools/ubisoft-auth.mjs' 'ticket'
         if (-not $ticket) { Record 'Ubisoft' 'failed' 'no ticket'; return }
 
         if (Set-Secret 'UBISOFT_REMEMBER_TICKET' $ticket) {
@@ -395,7 +409,7 @@ if (& $want 'ea') {
         Info 'Origin shut down, but its libraries moved to the EA app on the same account.'
         Info 'You will be asked for the remid cookie from a signed-in browser.'
 
-        $remid = Invoke-AuthTool 'tools/ea-auth.mjs' 'EA_REMID secret' 'cookie'
+        $remid = Invoke-AuthTool 'tools/ea-auth.mjs' 'cookie'
         if (-not $remid) { Record 'EA' 'failed' 'no cookie'; return }
         if (Set-Secret 'EA_REMID' $remid) { Record 'EA' 'done' } else { Record 'EA' 'failed' 'secret not saved' }
     }
@@ -415,7 +429,7 @@ if (& $want 'humble') {
         Info 'in no library at all, which is exactly when you would rebuy them.'
         Info 'You will be asked for the _simpleauth_sess cookie from a signed-in browser.'
 
-        $sess = Invoke-AuthTool 'tools/humble-auth.mjs' 'HUMBLE_SESSION secret' 'cookie'
+        $sess = Invoke-AuthTool 'tools/humble-auth.mjs' 'cookie'
         if (-not $sess) { Record 'Humble' 'failed' 'no cookie'; return }
         if (Set-Secret 'HUMBLE_SESSION' $sess) { Record 'Humble' 'done' } else { Record 'Humble' 'failed' 'secret not saved' }
     }

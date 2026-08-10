@@ -9,7 +9,7 @@
     "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File setup.ps1",
     "doctor": "node test/doctor.mjs",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File package.ps1",
-    "test": "node test/match.test.mjs && node test/deal.test.mjs && node test/auth.test.mjs && node test/manual.test.mjs && node test/subscriptions.test.mjs && node test/amazon.test.mjs && node test/merge.test.mjs && node test/snapshot-crypto.test.mjs && node test/static-site.test.mjs && node test/sources-panel.test.mjs && node test/contrast.test.mjs && node test/steam-id.test.mjs && node test/sealbox.test.mjs && node test/config-wiring.test.mjs && node test/nintendo-import.test.mjs && node test/humble.test.mjs && node test/redaction.test.mjs",
+    "test": "node test/match.test.mjs && node test/deal.test.mjs && node test/auth.test.mjs && node test/manual.test.mjs && node test/subscriptions.test.mjs && node test/amazon.test.mjs && node test/merge.test.mjs && node test/snapshot-crypto.test.mjs && node test/static-site.test.mjs && node test/sources-panel.test.mjs && node test/contrast.test.mjs && node test/steam-id.test.mjs && node test/sealbox.test.mjs && node test/config-wiring.test.mjs && node test/nintendo-import.test.mjs && node test/humble.test.mjs && node test/freebies.test.mjs && node test/redaction.test.mjs",
     "test:e2e": "node test/auth-e2e.test.mjs",
     "hash-password": "node -e \"import('./lib/auth.mjs').then(m=>{const c=require('crypto');const p=c.randomBytes(18).toString('base64url');console.log('PASSWORD: '+p);console.log('HASH:     '+m.hashPassword(p))})\"",
     "docker:build": "docker build -t gamevault:latest .",
@@ -18,6 +18,7 @@
     "verify-subs": "node test/gp-verify.mjs",
     "epic-auth": ".venv\\Scripts\\legendary auth",
     "epic-status": ".venv\\Scripts\\legendary status",
+    "free": "node tools/claim-free.mjs",
     "nintendo-import": "node tools/nintendo-import.mjs",
     "humble-auth": "node tools/humble-auth.mjs",
     "ea-auth": "node tools/ea-auth.mjs",
@@ -27,7 +28,7 @@
     "icons": "node tools/make-icons.mjs",
     "install-app": "powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1",
     "snapshot": "node tools/build-snapshot.mjs",
-    "test:site": "node test/static-site.test.mjs && node test/sources-panel.test.mjs && node test/contrast.test.mjs && node test/steam-id.test.mjs && node test/sealbox.test.mjs && node test/config-wiring.test.mjs && node test/nintendo-import.test.mjs && node test/humble.test.mjs && node test/redaction.test.mjs"
+    "test:site": "node test/static-site.test.mjs && node test/sources-panel.test.mjs && node test/contrast.test.mjs && node test/steam-id.test.mjs && node test/sealbox.test.mjs && node test/config-wiring.test.mjs && node test/nintendo-import.test.mjs && node test/humble.test.mjs && node test/freebies.test.mjs && node test/redaction.test.mjs"
   },
   "engines": {
     "node": ">=20"

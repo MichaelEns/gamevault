@@ -179,6 +179,7 @@ async function unlockWith(passphrase) {
                'Open Sources to connect Steam and the rest.');
     renderSetup();
   }
+  renderFreebies();
   $('#q').focus();
 }
 
@@ -350,6 +351,52 @@ function renderSetup() {
       <a href="https://github.com/${REPO}/actions" target="_blank" rel="noopener">snapshot workflow</a>
       to rebuild.
     </p>`;
+  box.classList.remove('hidden');
+}
+
+/* ---------- free to keep ----------
+ *
+ * Surfaced without being asked for, because these expire. A giveaway you
+ * learn about after it ends is worth nothing, so this is the one thing in the
+ * app that volunteers itself rather than waiting for a search.
+ *
+ * Games already owned ON EPIC are hidden entirely - there is nothing to do
+ * about them. Games owned on ANOTHER store are still shown, because a free
+ * permanent copy on a second store costs nothing and is worth having.
+ */
+function timeLeftLabel(endsAt) {
+  const ms = Date.parse(endsAt) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return 'ended';
+  const hours = Math.floor(ms / 3600000);
+  if (hours < 1) return `${Math.max(1, Math.round(ms / 60000))} min left`;
+  if (hours < 48) return `${hours}h left`;
+  return `${Math.floor(hours / 24)} days left`;
+}
+
+function renderFreebies() {
+  const box = $('#freebies');
+  if (!box) return;
+  const all = SNAP?.freebies ?? [];
+  // Nothing actionable about a game already in your Epic library.
+  const worth = all.filter((f) => !f.ownedHere && timeLeftLabel(f.endsAt) !== 'ended');
+
+  if (!worth.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+
+  const rows = worth.map((f) => {
+    const elsewhere = (f.ownedElsewhere ?? []).length
+      ? `<span class="free-note">you own it on ${esc(f.ownedElsewhere.join(', '))} — a free copy here still costs nothing</span>`
+      : '';
+    return `<li>
+      <a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a>
+      <span class="free-time">${esc(timeLeftLabel(f.endsAt))}</span>
+      ${elsewhere}
+    </li>`;
+  }).join('');
+
+  box.innerHTML = `
+    <h2 class="free-title">Free to keep &mdash; ${worth.length} you don&rsquo;t have</h2>
+    <ul class="free-list">${rows}</ul>
+    <p class="free-foot">Claim once and it is yours permanently.</p>`;
   box.classList.remove('hidden');
 }
 

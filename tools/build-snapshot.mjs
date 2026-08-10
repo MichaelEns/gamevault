@@ -25,6 +25,7 @@ import * as steam from '../lib/steam.mjs';
 import * as gog from '../lib/gog.mjs';
 import * as nintendo from '../lib/nintendo.mjs';
 import { syncLibrary, loadLibrary, providerStatus } from '../lib/library.mjs';
+import { currentFreebies } from '../lib/freebies.mjs';
 
 const OUT_DIR = path.join(PATHS.root, 'site');
 const ENV = process.env;
@@ -176,6 +177,19 @@ async function main() {
   }
   log(`${Object.keys(verdicts).length} verdicts computed`);
 
+  // ---- 4b. Free-to-keep giveaways ----------------------------------------
+  // Cheap (one public request) and time-sensitive: a giveaway missed is gone.
+  console.log('');
+  console.log('4b. Free to keep right now');
+  const freebies = await currentFreebies(ENV, library.index ?? {}).catch((e) => {
+    log(`freebies failed: ${e.message}`);
+    return [];
+  });
+  for (const f of freebies) {
+    log(`${f.title} - ${f.ownedHere ? 'already owned on Epic' : 'WORTH CLAIMING'}`);
+  }
+  if (!freebies.length) log('nothing free right now');
+
   // ---- 5. Assemble -------------------------------------------------------
   // Which providers are wired up, so the app can explain an empty library
   // instead of just showing "0 games owned". This goes INSIDE the encrypted
@@ -190,6 +204,7 @@ async function main() {
     entitledAssumed: entitled.assumed,
     stores,
     providers,
+    freebies,
     // The index maps normalised title -> where you own it.
     index: library.index ?? {},
     subs,
