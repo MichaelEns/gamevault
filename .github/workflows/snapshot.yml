@@ -97,6 +97,9 @@ jobs:
           # Hand-entered ownership for stores with no API (Nintendo, Battle.net,
           # Rockstar). data/ is gitignored - a public repo must not contain a
           # list of what you own - so this secret is how it reaches the build.
+          # Humble. Worth having even though most keys are Steam keys: an
+          # UNREDEEMED key is a game you own that appears in no library at all.
+          HUMBLE_SESSION: ${{ secrets.HUMBLE_SESSION }}
           MANUAL_LIBRARY: ${{ secrets.MANUAL_LIBRARY }}
           # Ubisoft Connect. Preferred is UBISOFT_REMEMBER_TICKET, obtained once
           # with tools/ubisoft-auth.mjs: it clears 2FA (which a password alone

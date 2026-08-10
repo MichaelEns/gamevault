@@ -27,7 +27,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('epic', 'amazon', 'ubisoft', 'ea', 'nintendo')]
+    [ValidateSet('epic', 'amazon', 'ubisoft', 'ea', 'humble', 'nintendo')]
     [string[]] $Only,
 
     [string] $Repo = 'MichaelEns/gamevault',
@@ -112,7 +112,7 @@ function Have($name) { return $existing.ContainsKey($name) }
 
 foreach ($s in @('STEAM_API_KEY', 'STEAM_ID', 'ITAD_API_KEY', 'ITCH_API_KEY',
                  'LEGENDARY_CONFIG', 'NILE_CONFIG', 'UBISOFT_REMEMBER_TICKET',
-                 'EA_REMID', 'MANUAL_LIBRARY')) {
+                 'EA_REMID', 'HUMBLE_SESSION', 'MANUAL_LIBRARY')) {
     if (Have $s) { Good "$s is set" } else { Info "$s is not set" }
 }
 
@@ -239,6 +239,30 @@ if (& $want 'ea') {
             if ($idx) {
                 $remid = ($out[$idx..($out.Count - 1)] | Where-Object { $_ -match '\S' } | Select-Object -First 1).ToString().Trim()
                 if ($remid -and $remid.Length -gt 20) { Set-Secret 'EA_REMID' $remid | Out-Null }
+                else { Warn 'Could not read the cookie from the output' }
+            }
+        } finally { Pop-Location }
+    }
+}
+
+# --- Humble Bundle ---------------------------------------------------------
+if (& $want 'humble') {
+    Head 'Humble Bundle'
+    if ((Have 'HUMBLE_SESSION') -and -not $Only) {
+        Info 'Already configured - skipping. Use -Only humble to redo it.'
+    } else {
+        Info 'Redeemed Steam keys are already covered by the Steam sync.'
+        Info 'The point of this is UNREDEEMED keys: games you bought that appear'
+        Info 'in no library at all, which is exactly when you would rebuy them.'
+        Info 'You will be asked for the _simpleauth_sess cookie from a signed-in browser.'
+        Push-Location $root
+        try {
+            $out = & node tools/humble-auth.mjs 2>&1
+            $out | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+            $idx = ($out | Select-String -Pattern 'HUMBLE_SESSION secret').LineNumber
+            if ($idx) {
+                $sess = ($out[$idx..($out.Count - 1)] | Where-Object { $_ -match '\S' } | Select-Object -First 1).ToString().Trim()
+                if ($sess -and $sess.Length -gt 20) { Set-Secret 'HUMBLE_SESSION' $sess | Out-Null }
                 else { Warn 'Could not read the cookie from the output' }
             }
         } finally { Pop-Location }

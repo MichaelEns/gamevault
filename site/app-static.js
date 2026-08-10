@@ -55,6 +55,15 @@ const SOURCES = [
           'signed-in browser.',
   },
   {
+    key: 'humble', label: 'Humble Bundle', unlocks: 'Bundles, Choice, and unredeemed keys',
+    needs: ['HUMBLE_SESSION'],
+    get: 'https://www.humblebundle.com/home/library',
+    hint: 'Most valuable source after Steam. Redeemed Steam keys are already ' +
+          'covered by the Steam sync \u2014 but an UNREDEEMED key is a game you own ' +
+          'that appears in no library anywhere, which is exactly when you would ' +
+          'buy it twice. Run "npm run humble-auth" once on a PC.',
+  },
+  {
     key: 'itch', label: 'itch.io', unlocks: 'Your itch.io purchases and bundles',
     needs: ['ITCH_API_KEY'],
     get: 'https://itch.io/user/settings/api-keys',
@@ -418,6 +427,7 @@ function renderConnect(state = {}) {
         <option value="STEAM_ID">STEAM_ID &mdash; your profile URL is fine</option>
         <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
         <option value="EA_REMID">EA_REMID &mdash; EA / Origin library</option>
+        <option value="HUMBLE_SESSION">HUMBLE_SESSION &mdash; Humble (unredeemed keys)</option>
         <option value="MANUAL_LIBRARY">MANUAL_LIBRARY &mdash; Nintendo etc. (JSON)</option>
         <option value="UBISOFT_REMEMBER_TICKET">UBISOFT_REMEMBER_TICKET &mdash; Ubisoft (clears 2FA)</option>
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
