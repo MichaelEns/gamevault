@@ -191,6 +191,30 @@ async function main() {
   if (!freebies.length) log('nothing free right now');
 
   // ---- 5. Assemble -------------------------------------------------------
+  // EA rotates its remid cookie when it is used, so the stored secret is spent
+  // after a single build. Writing the replacement back is the only way a
+  // scheduled build keeps working; without it EA would sync once and then fail
+  // every time, looking exactly like an expired credential.
+  if (ENV.EA_REMID && ENV.GAMEVAULT_SECRETS_TOKEN) {
+    try {
+      const ea = await import('../lib/ea.mjs');
+      if (ea.rotatedRemid && ea.rotatedRemid !== ENV.EA_REMID) {
+        const [{ putSecret }, nacl, blakejs] = await Promise.all([
+          import('../lib/github-secrets.mjs'),
+          import('tweetnacl').then((m) => m.default ?? m),
+          import('blakejs'),
+        ]);
+        const repo = ENV.GITHUB_REPOSITORY;
+        await putSecret(ENV.GAMEVAULT_SECRETS_TOKEN, repo, 'EA_REMID', ea.rotatedRemid,
+                        { nacl, blake2b: blakejs.blake2b });
+        console.log('  EA issued a replacement cookie; EA_REMID updated.');
+      }
+    } catch (e) {
+      // Never fatal: a snapshot without a refreshed cookie is still a good
+      // snapshot, and the next build will simply report EA as failing.
+      console.log(`  could not update EA_REMID: ${e.message}`);
+    }
+  }
   // Which providers are wired up, so the app can explain an empty library
   // instead of just showing "0 games owned". This goes INSIDE the encrypted
   // payload -- it names the services you use, which is nobody else's

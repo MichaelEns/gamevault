@@ -108,6 +108,11 @@ jobs:
           # long-lived browser cookie, obtained with tools/ea-auth.mjs.
           EA_REMID: ${{ secrets.EA_REMID }}
           EA_SID: ${{ secrets.EA_SID }}
+          # EA rotates remid on use, so the build must be able to write the
+          # replacement back or EA works for exactly one build. Optional: a
+          # fine-grained token with Secrets: Read and write on this repo.
+          GAMEVAULT_SECRETS_TOKEN: ${{ secrets.GAMEVAULT_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           # Hand-entered ownership for stores with no API (Nintendo, Battle.net,
           # Rockstar). data/ is gitignored - a public repo must not contain a
           # list of what you own - so this secret is how it reaches the build.

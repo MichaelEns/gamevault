@@ -100,14 +100,29 @@ try {
     console.log('For example: ' + games.slice(0, 3).map((g) => g.title).join(', '));
   }
 
+  // EA rotates remid when it is used, so the value that just worked may
+  // already be spent. Storing the spent one is what made the previous attempt
+  // authenticate successfully and then fail on the very next run.
+  const toStore = ea.rotatedRemid ?? remid;
+  if (ea.rotatedRemid) {
+    console.log('\nEA issued a replacement cookie during this check, which is why');
+    console.log('a stored value can work once and then stop. The replacement is');
+    console.log('what gets saved below.');
+  }
+
   console.log('\nAdd this as the EA_REMID secret:\n');
-  console.log(remid);
-  emit(remid);
-  console.log('\nIt is a long-lived cookie, but not permanent. If EA ownership');
-  console.log('stops updating, run this again to refresh it.');
+  console.log(toStore);
+  emit(toStore);
+  console.log('\nEA rotates this cookie as it is used, so it will need refreshing');
+  console.log('from time to time. If EA ownership stops updating, run this again.');
 } catch (e) {
   console.error('\nFailed: ' + e.message);
-  console.error('\nIf this says login_required, the cookie was copied incorrectly');
-  console.error('or has expired. Make sure you copied `remid` and not `sid`.');
+  if (/login_required/.test(e.message)) {
+    console.error('\nEA rotates remid when it is used, so a cookie that worked a moment');
+    console.error('ago may already be spent. Reload accounts.ea.com in the browser and');
+    console.error('copy the CURRENT value of remid, then run this again.');
+  } else {
+    console.error('\nCheck you copied `remid` from accounts.ea.com and not `sid`.');
+  }
   process.exit(1);
 }
