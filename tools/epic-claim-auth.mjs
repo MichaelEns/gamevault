@@ -1,96 +1,65 @@
 /**
- * One-time Epic sign-in, for claiming free games.
+ * Check that automatic Epic claiming is ready.
  *
- * Only the payment host is involved, and it is auth-gated rather than
- * bot-protected - verified directly:
+ * There is nothing to sign into and no cookie to copy. Epic lets a launcher
+ * token be exchanged for a web session, and legendary already holds one for
+ * reading your library - so the credential set up to LIST Epic games is also
+ * enough to CLAIM them.
  *
- *   store.epicgames.com/purchase          403  bot-protected
- *   payment-website-pci.../purchase       401  auth-gated only
- *
- * So a session cookie is enough and no browser impersonation is required.
- * Epic's login itself has bot protection, which is why this takes a cookie
- * rather than driving the sign-in - the same conclusion reached for EA and
- * Humble.
+ * Copying a cookie was the previous plan and it could not have worked: Epic
+ * marks its session cookies HttpOnly, so devtools shows no "Cookie:" request
+ * header and document.cookie cannot see them either. Anyone following those
+ * instructions would have collected a set missing the one that matters.
  *
  *   node tools/epic-claim-auth.mjs
  */
-import { createInterface } from 'node:readline';
-import { writeFileSync } from 'node:fs';
-import { stdin, stdout } from 'node:process';
 import * as epicClaim from '../lib/epic-claim.mjs';
 import { epicFreeGames } from '../lib/freebies.mjs';
 
-function emit(value) {
-  const i = process.argv.indexOf('--out');
-  if (i === -1 || !process.argv[i + 1]) return;
-  const payload = typeof value === 'string' ? value : JSON.stringify(value);
-  writeFileSync(process.argv[i + 1], payload, 'utf8');
-}
+console.log('Epic automatic claiming\n');
+console.log('No sign-in needed: legendary\u2019s existing login is exchanged for a');
+console.log('web session each time, so nothing extra is stored.\n');
 
-function ask(question) {
-  return new Promise((resolve) => {
-    const rl = createInterface({ input: stdin, output: stdout });
-    rl.question(question, (a) => { rl.close(); resolve(a.trim()); });
-  });
-}
-
-console.log('Epic sign-in for automatic claiming (one time)\n');
-console.log('1. Sign in at https://www.epicgames.com in your browser.');
-console.log('2. Press F12 -> Network, then reload the page.');
-console.log('3. Click any request to epicgames.com, find the "Cookie:" request');
-console.log('   header, and copy the WHOLE value.\n');
-console.log('Copying the whole header is deliberate: Epic\u2019s checkout needs');
-console.log('several cookies together, and picking out one is how this fails.\n');
-
-const cookies = await ask('Cookie header: ');
-if (!cookies) { console.error('Nothing entered.'); process.exit(1); }
-if (cookies.length < 40) {
-  console.error('\nThat looks too short for a full cookie header.');
-  console.error('Copy the entire "Cookie:" value, not a single cookie.');
+if (!epicClaim.configured(process.env)) {
+  console.error('Epic is not set up yet. Run this first:');
+  console.error('  .\\finish-setup.ps1 -Only epic');
   process.exit(1);
 }
-if (!/EPIC_BEARER_TOKEN|EPIC_SSO|EPIC_DEVICE|EPIC_SESSION/i.test(cookies)) {
-  console.log('\nWarning: none of Epic\u2019s usual session cookies are in there.');
-  console.log('Checking anyway - if this fails, you likely copied the wrong header.\n');
-}
 
-console.log('Checking with Epic...');
+console.log('Checking Epic accepts the launcher token...');
 try {
   const free = await epicFreeGames(process.env.COUNTRY || 'US');
+
   if (!free.length) {
-    console.log('\nNothing is free on Epic right now, so the claim path cannot be');
-    console.log('exercised. The cookie will be stored and used at the next giveaway.');
-    console.log('\nAdd this as the EPIC_COOKIES secret:\n');
-    console.log(cookies);
-    emit(cookies);
+    await epicClaim.probeSession(process.env);
+    console.log('Session works. Nothing is free right now; the next scheduled');
+    console.log('build will claim automatically when something is.');
     process.exit(0);
   }
 
-  // Reaching the purchase page proves the session works, without buying
-  // anything: the token fetch is a GET and commits to nothing.
   const target = free[0];
-  console.log(`Testing against the current giveaway: ${target.title}`);
-  const result = await epicClaim.claim(process.env.EPIC_COOKIES
-    ? process.env
-    : { ...process.env, EPIC_COOKIES: cookies }, target).catch((e) => ({ error: e }));
+  console.log(`Currently free: ${target.title}`);
+  console.log('Claiming it now, as a live test...\n');
+
+  const result = await epicClaim.claim(process.env, target).catch((e) => ({ error: e }));
 
   if (result?.error?.alreadyOwned) {
-    console.log('Epic says you already own it - which means the session works.');
+    console.log(`You already own ${target.title}, which proves the session works.`);
   } else if (result?.error) {
-    console.error(`\nFailed: ${result.error.message}`);
-    console.error('\nIf this says 401, the cookie header was copied incorrectly or');
-    console.error('has expired. Copy it again from a freshly loaded page.');
+    console.error(`Failed: ${result.error.message}`);
+    if (/expired|401/.test(result.error.message)) {
+      console.error('\nThe launcher token has expired. Re-run:');
+      console.error('  .\\finish-setup.ps1 -Only epic');
+    }
     process.exit(1);
   } else {
-    console.log(`Claimed ${target.title} successfully.`);
+    console.log(`Claimed ${target.title}.`);
   }
 
-  console.log('\nAdd this as the EPIC_COOKIES secret:\n');
-  console.log(cookies);
-  emit(cookies);
-  console.log('\nEpic sessions expire after a while. If claiming stops working,');
-  console.log('run this again - and the app will tell you, because every claim is');
-  console.log('checked against your library on the next sync.');
+  console.log('\nAutomatic claiming is ready. Every claim is checked against your');
+  console.log('library on the next sync, and anything that did not arrive shows in');
+  console.log('red in the app and opens a GitHub issue, so a silent failure cannot');
+  console.log('go unnoticed.');
 } catch (e) {
   console.error('\nFailed: ' + e.message);
   process.exit(1);

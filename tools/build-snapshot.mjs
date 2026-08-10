@@ -307,10 +307,20 @@ async function main() {
           console.log(`  ${name} refreshed (the provider rotated it).`);
         }
       } catch (e) {
-        // Never fatal: a snapshot built with a now-stale credential is still a
-        // good snapshot, and the next build will report the source as failing.
-        console.log(`  could not refresh rotated credentials: ${e.message}`);
+        // Loud, and specifically NOT swallowed. A failure here costs nothing
+        // today and kills every rotating credential tomorrow, which is exactly
+        // the shape of failure that hid twice already: the provider works,
+        // then dies a build later for reasons pointing nowhere near this.
+        console.log(`::error::Could not refresh rotated credentials: ${e.message}`);
+        console.log('  The provider that rotated will fail on the next build.');
+        if (/401|403|404/.test(e.message)) {
+          console.log('  GAMEVAULT_SECRETS_TOKEN needs "Secrets: Read and write" on this repository.');
+        }
       }
+    } else if (ENV.UBISOFT_REMEMBER_TICKET || ENV.EA_REMID) {
+      // Silence here is ambiguous - it could mean nothing rotated, or that
+      // rotation was never detected. Say which.
+      log('no credentials rotated this run');
     }
   } else if (ENV.EA_REMID || ENV.UBISOFT_REMEMBER_TICKET) {
     console.log('  note: EA and Ubisoft rotate their credentials. Without ' +
