@@ -182,6 +182,17 @@ async function main() {
     }
     process.stdout.write('\n');
     log(`${Object.keys(prices).length} titles have price data`);
+
+    // A watchlist entry that silently produces no price is the exact failure
+    // this feature exists to prevent, and it is invisible in the totals: the
+    // build succeeds, the count looks plausible, and the one game you asked
+    // about by name has nothing. Name them so a typo or an unrecognised title
+    // is obvious rather than inferred from a number.
+    const missed = watchlist.filter((t) => !prices[normalizeTitle(t)]);
+    if (missed.length) {
+      log(`::warning::no price found for ${missed.length} watchlist title(s): ${missed.join(', ')}`);
+      log('the app will look these up live instead; check the spelling if that also fails');
+    }
   }
 
   // ---- 4. Pre-compute verdicts ------------------------------------------
