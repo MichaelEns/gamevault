@@ -139,6 +139,10 @@ async function main() {
       (budget.dropped ? ` (${budget.dropped} dropped at the cap)` : ''));
 
   const prices = {};
+  // Identifiers we were handed directly, so they never need looking up again.
+  const knownIds = new Map(
+    trending.filter((t) => t.id).map((t) => [String(t.title).toLowerCase(), t.id]),
+  );
   if (!itad.hasKey(ENV)) {
     log('no ITAD key - skipping prices and historical lows');
   } else {
@@ -150,6 +154,13 @@ async function main() {
 
     for (const chunk of chunks) {
       const found = await pool(chunk, 4, async (title) => {
+        // Trending entries arrive from ITAD with their own ids. Round-tripping
+        // those back through an exact-title lookup threw away a reliable
+        // identifier in favour of a fuzzy one, and lost roughly four out of
+        // five titles: 393 targets produced 79 prices. Use the id when we
+        // already have it and only search for titles we do not.
+        const known = knownIds.get(title.toLowerCase());
+        if (known) return { title, id: known };
         const g = await itad.lookup(title, ENV).catch(() => null);
         return g ? { title, id: g.id } : null;
       });
