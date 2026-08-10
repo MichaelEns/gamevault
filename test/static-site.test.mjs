@@ -133,6 +133,10 @@ try {
   ok(/\.catch\(\(\) => caches\.match\(request\)/.test(restBranch),
      'and still falls back to cache when offline');
   ok(/'gv-purge'/.test(swSrc), 'exposes a purge message so the app can force a refresh');
+  ok(/LEGACY_CACHES/.test(swSrc) && /c\.navigate/.test(swSrc),
+     'clients stuck on a pre-stamp cache-first build are navigated out of it');
+  ok(/if \(!stale\.some\(\(k\) => LEGACY_CACHES\.includes\(k\)\)\) return;/.test(swSrc),
+     'and ONLY those - an ordinary rebuild must not reload a live session');
 
   console.log('\nThe app can recover from a stale cache without browser chrome');
   const appSrc = await (await fetch(`${BASE}/app-static.js`)).text();
@@ -144,6 +148,10 @@ try {
   ok(/id="refreshBtn"/.test(indexSrc), 'a visible Refresh control exists too');
   ok(/controllerchange/.test(indexSrc),
      'page reloads when a new worker takes over, so a deploy lands immediately');
+  ok(/if \(reloading \|\| window\.__gvUnlocked\) return;/.test(indexSrc),
+     'but never while unlocked - the snapshot is memory-only and would be lost');
+  ok(/__gvUnlocked = true/.test(appSrc) && /__gvUnlocked = false/.test(appSrc),
+     'the unlocked flag is both set on unlock and cleared on lock');
 
   console.log('\nEvery service-worker precache entry actually exists');
   // addAll() is all-or-nothing: a single 404 (the old '/app.js', which this

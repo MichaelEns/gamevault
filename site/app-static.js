@@ -121,6 +121,9 @@ async function unlockWith(passphrase) {
   $('#pass').value = '';
   $('#lock').classList.add('hidden');
   $('#app').classList.remove('hidden');
+  // Tells the update handler not to reload underneath a live session; the
+  // decrypted snapshot exists only in memory.
+  globalThis.__gvUnlocked = true;
 
   const age = ageOf(SNAP.builtAt);
   $('#tag').innerHTML =
@@ -182,6 +185,7 @@ $('#unlockForm').addEventListener('submit', async (e) => {
 $('#lockBtn').addEventListener('click', () => {
   SNAP = null;                      // drop the plaintext from memory
   forget();                         // Lock means lock: don't auto-reopen
+  globalThis.__gvUnlocked = false;  // a pending update may now apply freely
   $('#remember').checked = false;
   $('#results').innerHTML = '';
   $('#q').value = '';

@@ -85,12 +85,14 @@
       navigator.serviceWorker.register('./sw.js').catch(function () {});
     });
 
-    // When a new worker takes over, the page is still showing assets from the
-    // old one. Without this reload a deployed fix appears only on the NEXT
-    // launch, which looks exactly like "it was never deployed".
+    // When a new worker takes over, the page may still be showing assets from
+    // the old one. Reloading fixes that -- but not while the snapshot is
+    // unlocked: the snapshot lives only in memory, so a reload during one of
+    // the scheduled rebuilds would silently drop it and demand the passphrase
+    // again. Assets are fetched network-first anyway, so waiting costs nothing.
     var reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (reloading) return;      // guard: controllerchange can fire more than once
+      if (reloading || window.__gvUnlocked) return;
       reloading = true;
       location.reload();
     });

@@ -44,12 +44,30 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// Cache names used before the build stamp existed. Those builds were
+// cache-first, so a page loaded under them is showing assets that may be
+// arbitrarily old and predates the reload-on-update handler in index.html.
+// Navigating those clients is the only way to correct them from here.
+const LEGACY_CACHES = ['gv-static-v1', 'gv-static-v2'];
+
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    const stale = keys.filter((k) => k !== VERSION);
+    await Promise.all(stale.map((k) => caches.delete(k)));
+    await self.clients.claim();
+
+    // Deliberately NOT done for ordinary upgrades: a forced navigation during
+    // a scheduled rebuild would drop the decrypted snapshot and bounce the
+    // user back to the passphrase screen mid-use. Once network-first is in
+    // effect, every launch fetches current assets anyway, so this is only
+    // needed to escape the older cache-first builds.
+    if (!stale.some((k) => LEGACY_CACHES.includes(k))) return;
+    const windows = await self.clients.matchAll({ type: 'window' });
+    for (const c of windows) {
+      if (typeof c.navigate === 'function') c.navigate(c.url).catch(() => {});
+    }
+  })());
 });
 
 // Lets the page trigger a genuine refresh (pull-to-refresh) without having to
