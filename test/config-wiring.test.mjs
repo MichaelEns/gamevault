@@ -25,6 +25,15 @@ const ok = (cond, msg) => {
 const workflow = await readFile(
   path.join(PATHS.root, '.github', 'workflows', 'snapshot.yml'), 'utf8');
 
+// Claiming moved into its own workflow so a Playwright failure could not
+// disturb the library sync. Its env block is just as load-bearing, and
+// checking only snapshot.yml reported BROWSER_STATE as unwired when it was
+// wired correctly all along - a false alarm that trains you to ignore the
+// suite. Wiring is satisfied by EITHER workflow.
+const claimWorkflow = await readFile(
+  path.join(PATHS.root, '.github', 'workflows', 'claim.yml'), 'utf8');
+const anyWorkflow = `${workflow}\n${claimWorkflow}`;
+
 const sources = [];
 for (const dir of ['lib', 'tools']) {
   const base = path.join(PATHS.root, dir);
@@ -40,6 +49,8 @@ const NOT_FROM_CI = new Set([
   'GAMEVAULT_DATA_DIR', 'GAMEVAULT_LEGENDARY_BIN', 'GAMEVAULT_NILE_BIN',
   'GAMEVAULT_PASSWORD', 'GAMEVAULT_PASSWORD_HASH',
   'PORT', 'HOST', 'TRUST_PROXY', 'NODE_ENV',
+  // Set by the Actions runner itself; wiring it would be redundant.
+  'GITHUB_ACTIONS',
 ]);
 
 console.log('Every configurable the build reads is passed by the workflow');
@@ -51,8 +62,8 @@ for (const file of sources) {
 }
 for (const name of [...read].sort()) {
   if (NOT_FROM_CI.has(name)) continue;
-  ok(workflow.includes(`${name}:`),
-     `${name} is wired into the workflow env`);
+  ok(anyWorkflow.includes(`${name}:`),
+     `${name} is wired into a workflow env`);
 }
 
 console.log('\nDefaults survive the empty string GitHub actually passes');

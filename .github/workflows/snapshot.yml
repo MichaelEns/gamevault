@@ -153,6 +153,12 @@ jobs:
           # Epic rotates its launcher refresh token; kept separately so the
           # whole LEGENDARY_CONFIG archive does not have to be rewritten.
           EPIC_REFRESH_TOKEN: ${{ secrets.EPIC_REFRESH_TOKEN }}
+          # Two optional overrides for the same session. LEGENDARY_USER_JSON
+          # takes the token straight from a user.json when the ZIP archive is
+          # inconvenient; EPIC_ACCESS_TOKEN short-circuits the refresh entirely
+          # and is mainly useful for reproducing a failure by hand.
+          LEGENDARY_USER_JSON: ${{ secrets.LEGENDARY_USER_JSON }}
+          EPIC_ACCESS_TOKEN: ${{ secrets.EPIC_ACCESS_TOKEN }}
           # Used to fetch the previous snapshot, so the claim log survives
           # between builds and last week's claims can be verified.
           SITE_URL: ${{ vars.SITE_URL }}
@@ -171,6 +177,16 @@ jobs:
           # How many titles to price per build. Raise if the library outgrows
           # the default and prices start getting truncated.
           SNAPSHOT_PRICE_LIMIT: ${{ vars.SNAPSHOT_PRICE_LIMIT }}
+          # Titles to price beyond what you own. The watchlist is yours; the
+          # trending list is ITAD's most-wanted, which is what an unplanned
+          # search is most likely to land on.
+          WATCHLIST: ${{ vars.WATCHLIST }}
+          TRENDING_LIMIT: ${{ vars.TRENDING_LIMIT }}
+          # Owned titles are skipped by default - see build-snapshot.mjs.
+          PRICE_OWNED: ${{ vars.PRICE_OWNED }}
+          # Set to 0 to keep the ITAD key out of the (encrypted) snapshot,
+          # at the cost of live price lookup for unowned games.
+          LIVE_PRICES: ${{ vars.LIVE_PRICES }}
         run: node tools/build-snapshot.mjs
 
       - name: Fail if the snapshot is unencrypted
@@ -192,7 +208,7 @@ jobs:
         run: |
           cp public/icon-180.png public/icon-192.png public/icon-512.png \
              public/icon-maskable.png public/style.css site/
-          cp lib/snapshot-crypto.mjs lib/github-secrets.mjs site/
+          cp lib/snapshot-crypto.mjs lib/github-secrets.mjs lib/deal.mjs site/
 
       - name: Stamp the service-worker cache version
         # A constant cache name meant activate() never purged anything, so a

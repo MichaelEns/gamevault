@@ -29,6 +29,7 @@ const SHELL = [
   './index.html',
   './style.css',
   './app-static.js',
+  './live-prices.js',
   './snapshot-crypto.mjs',
   './manifest.webmanifest',
   './icon-192.png',

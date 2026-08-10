@@ -42,10 +42,19 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 try {
   console.log('Every file the PWA needs is served');
-  for (const f of ['/', '/app-static.js', '/snapshot-crypto.mjs', '/style.css',
+  // Derived from app-static.js's own imports rather than hand-listed. A module
+  // imported but never copied into site/ 404s at runtime and takes the whole
+  // app down, yet looks fine locally if a stale copy happens to be sitting
+  // there. Deriving the list is the only version of this check that cannot
+  // quietly fall behind the code.
+  const appSource = await readFile(path.join(SITE, 'app-static.js'), 'utf8');
+  const imported = [...appSource.matchAll(/(?:from|import)\s*\(?\s*['"](\.\/[^'"]+)['"]/g)]
+    .map((m) => m[1].replace(/^\./, ''));
+
+  for (const f of ['/', '/app-static.js', '/style.css',
                    '/manifest.webmanifest', '/sw.js', '/snapshot.json',
                    '/snapshot-meta.json', '/icon-192.png', '/icon-180.png',
-                   '/sealbox.js', '/github-secrets.mjs']) {
+                   ...new Set(imported)]) {
     const r = await fetch(BASE + f);
     ok(r.ok, `${f} -> ${r.status}`);
   }

@@ -9,7 +9,7 @@
  * clears it; the passphrase is never persisted.
  */
 import { decryptJson } from './snapshot-crypto.mjs';
-
+import { livePrice, storeLinks } from './live-prices.js';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
@@ -556,6 +556,7 @@ function renderConnect(state = {}) {
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
         <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; no 2FA accounts only</option>
         <option value="LEGENDARY_CONFIG">LEGENDARY_CONFIG &mdash; Epic (base64)</option>
+        <option value="EPIC_COOKIES">EPIC_COOKIES &mdash; Epic claiming (fallback)</option>
         <option value="NILE_CONFIG">NILE_CONFIG &mdash; Prime Gaming (base64)</option>
       </select>
       <label for="secretValue">Value</label>
@@ -858,10 +859,21 @@ $('#searchForm').addEventListener('submit', (e) => {
 function render(hits, term) {
   const results = $('#results');
   if (!hits.length) {
+    // A game absent from your library, the rosters AND the priced set is the
+    // most interesting search there is: it is something you might buy. Ending
+    // at "nothing matching" answered the ownership question and abandoned the
+    // price one, so treat a miss as a live lookup instead of a dead end.
     results.innerHTML =
-      `<div class="spin">Nothing matching “${esc(term)}” in your library or subscriptions.<br>` +
-      `<span style="color:var(--dim);font-size:13px">This snapshot only covers what you own, ` +
-      `the subscription rosters, and your watchlist.</span></div>`;
+      `<article class="card v-unknown" data-norm="${esc(normalize(term))}" data-title="${esc(term)}">
+         <div class="card-head">
+           <h2 class="title">${esc(term)}</h2>
+           <span class="verdict">Checking prices…</span>
+         </div>
+         <p class="reason">You do not own this on any connected store, and it is not in a
+            subscription you have. Looking up what it costs.</p>
+         <div class="pricearea"></div>
+       </article>`;
+    fillLivePrices([{ norm: normalize(term), title: term }]);
     return;
   }
 
@@ -869,7 +881,6 @@ function render(hits, term) {
     const owned = SNAP.index[h.norm] ?? [];
     const price = SNAP.prices[h.norm] ?? null;
     const verdict = SNAP.verdicts[h.norm] ?? null;
-
     const access = [];
     for (const [key, s] of Object.entries(SNAP.subs)) {
       if (s.norms.includes(h.norm)) {
@@ -887,9 +898,9 @@ function render(hits, term) {
               reason: `Playable at no extra cost via ${access.filter((a) => a.entitled).map((a) => a.label).join(', ')}.` };
       } else if (access.length) {
         v = { verdict: 'unknown', label: 'No price data',
-              reason: `On ${access.map((a) => a.label).join(', ')}, which your plan does not include. No price in this snapshot.` };
+              reason: `On ${access.map((a) => a.label).join(', ')}, which your plan does not include.` };
       } else {
-        v = { verdict: 'unknown', label: 'No price data', reason: 'Not priced in this snapshot — add it to watchlist.txt.' };
+        v = { verdict: 'unknown', label: 'Checking prices…', reason: 'Not in this snapshot — looking up current prices.' };
       }
     }
 
@@ -910,19 +921,135 @@ function render(hits, term) {
       : '';
 
     return `
-      <article class="card v-${esc(v.verdict)}">
+      <article class="card v-${esc(v.verdict)}" data-norm="${esc(h.norm)}" data-title="${esc(h.title)}">
         <div class="card-head">
           <h2 class="title">${esc(price?.title ?? h.title)}</h2>
           <span class="verdict">${esc(v.label)}</span>
         </div>
         <p class="reason">${esc(v.reason)}</p>
         ${ownBadges || subBadges ? `<div class="badges">${ownBadges}${subBadges}</div>` : ''}
-        ${rows ? `<div class="prices">${rows}</div>` : ''}
-        ${low}
+        <div class="pricearea">${rows ? `<div class="prices">${rows}</div>` : ''}${low}</div>
       </article>`;
   }).join('');
+
+  fillLivePrices(hits);
 
   const age = ageOf(SNAP.builtAt);
   $('#sources').textContent =
     `Offline snapshot · built ${age.label} · ${SNAP.counts.owned} owned, ${SNAP.counts.priced} priced`;
 }
+
+/**
+ * Fill in prices for searched games the snapshot did not cover.
+ *
+ * The snapshot cannot price everything, and the games worth pricing are
+ * exactly the ones missing from it — you search for what you might buy, and
+ * you do not already own that. So rather than leave those cards blank, look
+ * the price up live and fall back to storefront search links if the browser
+ * refuses the cross-origin call.
+ */
+async function fillLivePrices(hits) {
+  const needing = hits.filter((h) => {
+    if (SNAP.prices[h.norm]?.deals?.length) return false;   // already priced
+    if ((SNAP.index[h.norm] ?? []).length) return false;     // owned: not buying it
+    const entitled = Object.entries(SNAP.subs)
+      .some(([k, s]) => s.norms.includes(h.norm) && SNAP.entitled.includes(k));
+    return !entitled;                                        // included: not buying it
+  });
+  if (!needing.length) return;
+
+  const { scoreDeal } = await import('./deal.mjs').catch(() => ({}));
+
+  await Promise.all(needing.map(async (h) => {
+    const card = document.querySelector(`.card[data-norm="${cssEscape(h.norm)}"]`);
+    if (!card) return;
+
+    const result = await livePrice(h.title, SNAP.live);
+    const area = card.querySelector('.pricearea');
+    const verdictEl = card.querySelector('.verdict');
+    const reasonEl = card.querySelector('.reason');
+
+    if (!result) {
+      // Either live lookup is off, the browser blocked it, or ITAD has no
+      // listing. Search links still answer "who sells this", and - if a token
+      // is stored - the watchlist route can get real prices in a minute or
+      // two, which is the only reliable way when CORS is closed.
+      const links = storeLinks(h.title).map((l) =>
+        `<a class="storelink" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.shop)}</a>`).join('');
+      const canTrack = Boolean(readToken());
+      area.innerHTML =
+        `<div class="storelinks">${links}</div>` +
+        (canTrack
+          ? `<button class="trackbtn" type="button" data-track="${esc(h.title)}">Track it &amp; fetch prices</button>`
+          : `<div class="livenote">Connect a token in Settings to fetch real prices for this.</div>`);
+      if (verdictEl) verdictEl.textContent = 'No price data';
+      if (reasonEl) reasonEl.textContent =
+        SNAP.live
+          ? 'Live price lookup was unavailable. Search the stores directly:'
+          : 'Not priced in this snapshot. Search the stores directly:';
+      return;
+    }
+
+    const rows = result.deals.map((d, i) => `
+      <div class="price-row ${i === 0 ? 'cheapest' : ''}">
+        <span class="shop">${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.shop)}</a>` : esc(d.shop)}</span>
+        <span class="cut">${d.cut ? `-${d.cut}%` : ''}</span>
+        <span class="amt">${money(d.amount, d.currency)}</span>
+      </div>`).join('');
+
+    const low = result.low
+      ? `<div class="lowline">All-time low: <strong>${money(result.low.amount, result.low.currency)}</strong>` +
+        `${result.low.shop ? ` at ${esc(result.low.shop)}` : ''}</div>`
+      : '';
+
+    area.innerHTML = `<div class="prices">${rows}</div>${low}` +
+      `<div class="livenote">Live prices, fetched just now.</div>`;
+
+    // Reuse the builder's own scoring so a live verdict and a snapshot
+    // verdict can never disagree about the same numbers. Deals arrive sorted
+    // cheapest-first, so the head is the best offer.
+    if (scoreDeal) {
+      const best = result.deals[0];
+      const v = scoreDeal({
+        owned: false, access: [],
+        current: best?.amount ?? null,
+        regular: best?.regular ?? null,
+        low: result.low?.amount ?? null,
+      });
+      card.className = `card v-${v.verdict}`;
+      if (verdictEl) verdictEl.textContent = v.label;
+      if (reasonEl) reasonEl.textContent = v.reason;
+    }
+  }));
+}
+
+// Attribute selectors need escaping; normalised titles can contain anything.
+const cssEscape = (s) => (window.CSS?.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'));
+
+/**
+ * Add a title to the watchlist variable and rebuild.
+ *
+ * When the browser cannot reach a price API directly, the build still can.
+ * Delegated from the results container so it keeps working across re-renders.
+ */
+$('#results').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.trackbtn');
+  if (!btn) return;
+  const title = btn.dataset.track;
+  btn.disabled = true;
+  btn.textContent = 'Adding\u2026';
+  try {
+    const { api } = await ghModule();
+    const token = readToken();
+    const current = await api.getVariable(token, REPO, 'WATCHLIST').catch(() => '');
+    const lines = String(current || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!lines.some((l) => l.toLowerCase() === title.toLowerCase())) lines.push(title);
+    await api.putVariable(token, REPO, 'WATCHLIST', lines.join('\n'));
+    await api.runWorkflow(token, REPO);
+    btn.textContent = 'Tracking \u2014 prices in a minute or two';
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = `Could not track it: ${err.message}`;
+  }
+});
+

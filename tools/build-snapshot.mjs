@@ -19,6 +19,7 @@ import { PATHS } from '../lib/paths.mjs';
 import { settle, pool } from '../lib/http.mjs';
 import { normalizeTitle } from '../lib/match.mjs';
 import { scoreDeal, bestOffer } from '../lib/deal.mjs';
+import { selectPriceTargets } from '../lib/price-budget.mjs';
 import * as gamepass from '../lib/gamepass.mjs';
 import * as itad from '../lib/itad.mjs';
 import * as steam from '../lib/steam.mjs';
@@ -37,8 +38,23 @@ const COUNTRY = ENV.COUNTRY || 'US';
 
 const log = (m) => console.log(`  ${m}`);
 
+// GitHub Actions passes an EMPTY STRING for an unset variable, never
+// undefined, so `??` never fires on one and `Number('' ?? 400)` is 0. Every
+// default here has to key off emptiness, not nullishness.
+const flag = (v, dflt = false) => {
+  const s = String(v ?? '').trim();
+  return s ? /^(1|true|yes|on)$/i.test(s) : dflt;
+};
+
 /** Watchlist: games you want price/deal data for but may not own. */
 async function loadWatchlist() {
+  // Like the manual library, this has to reach the cloud build somehow: the
+  // file is local and gitignored, so a watchlist edited on a PC contributed
+  // nothing to the published snapshot.
+  const fromEnv = ENV.WATCHLIST;
+  if (fromEnv) {
+    return fromEnv.split(/[\r\n,]+/).map((l) => l.replace(/#.*$/, '').trim()).filter(Boolean);
+  }
   const file = path.join(PATHS.root, 'watchlist.txt');
   if (!existsSync(file)) return [];
   const text = await readFile(file, 'utf8');
@@ -95,15 +111,32 @@ async function main() {
   const watchlist = await loadWatchlist();
   log(`watchlist: ${watchlist.length} entries`);
 
-  // Price the watchlist plus your owned titles, de-duplicated. Owned games
-  // still get prices so the app can show "you own this, and it is 80% off"
-  // -- useful for gifting, and for spotting a better edition.
-  const wanted = [...new Set([...watchlist, ...ownedTitles].map((t) => t.trim()).filter(Boolean))];
-  const cap = Number(ENV.SNAPSHOT_PRICE_LIMIT) || 400;
-  const priceTargets = wanted.slice(0, cap);
-  if (wanted.length > cap) {
-    log(`capping at ${cap} titles (set SNAPSHOT_PRICE_LIMIT to raise)`);
-  }
+  // Trending titles are priced too. Without them a search for something you do
+  // not own answered "you don't have it" and nothing else - no shops, no
+  // prices - which is only half the question. The app now also falls back to a
+  // live ITAD lookup for anything missing here, so this is a fast path rather
+  // than the only path.
+  const trending = await itad.trending(ENV, Number(ENV.TRENDING_LIMIT) || 200).catch(() => []);
+  if (trending.length) log(`trending: ${trending.length} titles people are tracking`);
+
+  // Settle the browser question with the real key while we have it.
+  const liveCors = flag(ENV.LIVE_PRICES, true) && await itad.corsCheck(ENV);
+  log(`live price lookup from the browser: ${liveCors ? 'ALLOWED' : 'blocked (snapshot + store links only)'}`);
+
+  const cap = Number(ENV.SNAPSHOT_PRICE_LIMIT) || 800;
+
+  // Owned titles are NOT priced by default. See lib/price-budget.mjs for why;
+  // PRICE_OWNED=1 restores the old behaviour.
+  const { targets: priceTargets, counts: budget } = selectPriceTargets({
+    watchlist,
+    trending: trending.map((t) => t.title),
+    owned: ownedTitles,
+    cap,
+    priceOwned: flag(ENV.PRICE_OWNED, false),
+  });
+  log(`pricing ${priceTargets.length} titles: ${budget.watchlist} watchlist, ` +
+      `${budget.trending} trending, ${budget.owned} owned` +
+      (budget.dropped ? ` (${budget.dropped} dropped at the cap)` : ''));
 
   const prices = {};
   if (!itad.hasKey(ENV)) {
@@ -372,6 +405,14 @@ async function main() {
     subs,
     prices,
     verdicts,
+    // Credential for live, on-demand price lookup from the browser.
+    //
+    // Only shipped when the browser can actually use it - measured this build,
+    // not assumed. It rides inside the AES-256-GCM payload, so it is readable
+    // only by someone who already has your passphrase, and it is a free
+    // read-only price key rather than an account credential. Even so, there is
+    // no reason to hand out a key that cannot be used. LIVE_PRICES=0 opts out.
+    live: liveCors ? { itadKey: ENV.ITAD_API_KEY, country: COUNTRY } : null,
     counts: {
       owned: Object.keys(library.index ?? {}).length,
       subscriptions: Object.values(subs).reduce((n, s) => n + s.count, 0),

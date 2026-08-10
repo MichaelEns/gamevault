@@ -133,6 +133,16 @@ a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .lowline { margin-top: 8px; font-size: 13px; color: var(--dim); }
+
+/* Live-lookup affordances. These use theme variables only, so they stay
+   legible in both colour schemes without a second definition below. */
+.livenote { margin-top: 6px; font-size: 12px; color: var(--dim); }
+.storelinks { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.storelink {
+  padding: 7px 11px; border-radius: 999px; font-size: 13px;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--link);
+  min-height: 32px; display: inline-flex; align-items: center;
+}
 footer { padding: 0 24px 30px; color: var(--dim); font-size: 12px; }
 .spin { color: var(--dim); padding: 10px 24px; }
 
