@@ -44,7 +44,11 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
 function emit(value) {
   const i = process.argv.indexOf('--out');
   if (i === -1 || !process.argv[i + 1]) return;
-  writeFileSync(process.argv[i + 1], value, 'utf8');
+  // A tool may return one secret or several named ones; JSON is how the
+  // caller tells them apart. writeFileSync only accepts a string, so an
+  // object has to be serialised rather than handed over raw.
+  const payload = typeof value === 'string' ? value : JSON.stringify(value);
+  writeFileSync(process.argv[i + 1], payload, 'utf8');
 }
 function ask(question, { hidden = false } = {}) {
   return new Promise((resolve) => {
