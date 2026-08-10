@@ -39,9 +39,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
@@ -150,6 +150,9 @@ jobs:
           # GOG giveaways. Rotates its refresh token on every use, so it needs
           # GAMEVAULT_SECRETS_TOKEN to keep working past one build.
           GOG_REFRESH_TOKEN: ${{ secrets.GOG_REFRESH_TOKEN }}
+          # Epic rotates its launcher refresh token; kept separately so the
+          # whole LEGENDARY_CONFIG archive does not have to be rewritten.
+          EPIC_REFRESH_TOKEN: ${{ secrets.EPIC_REFRESH_TOKEN }}
           # Used to fetch the previous snapshot, so the claim log survives
           # between builds and last week's claims can be verified.
           SITE_URL: ${{ vars.SITE_URL }}
@@ -246,7 +249,7 @@ jobs:
           This issue will not be reopened while it stays open, so the six-hourly build will not keep mailing you. Close it once the games are claimed."
 
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: site
 

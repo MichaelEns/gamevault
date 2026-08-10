@@ -309,6 +309,13 @@ async function main() {
       // GOG issues a new refresh token on every use and retires the old one.
       const gogMod = await import('../lib/gog-claim.mjs');
       if (gogMod.rotatedToken) rotations.push(['GOG_REFRESH_TOKEN', gogMod.rotatedToken]);
+    } catch { /* GOG not configured */ }
+    try {
+      // Epic rotates the launcher refresh token when it is used to mint a
+      // new access token, so the whole LEGENDARY_CONFIG archive goes stale
+      // unless the replacement is kept.
+      const epicMod = await import('../lib/epic-claim.mjs');
+      if (epicMod.rotatedRefreshToken) rotations.push(['EPIC_REFRESH_TOKEN', epicMod.rotatedRefreshToken]);
     } catch { /* Ubisoft not configured */ }
 
     if (rotations.length) {
