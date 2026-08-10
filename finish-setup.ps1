@@ -193,29 +193,67 @@ function Set-Secret {
 # Store clients write their token to different places depending on version and
 # platform, so look rather than assume - a missing config is otherwise reported
 # as "sign-in did not complete" when in fact it did.
-function Find-ClientConfig {
+# Store clients do not keep a single, stably-named credential file.
+#
+# nile migrated user.json to user.enc (AES, with the key derived from the
+# Amazon account id held in a separate plaintext file), so copying one file
+# captures either the ciphertext or the key but never both. legendary spreads
+# state across several files too, and both use platformdirs, whose layout
+# varies by platform and version.
+#
+# Archiving the whole configuration directory sidesteps all of that: whatever
+# the client wrote, in whatever files, comes along.
+function Get-ClientConfigDir {
     param([string] $Client)
-    # Fast paths first.
-    foreach ($c in @(
-        (Join-Path $env:USERPROFILE ".config\$Client\user.json"),
-        (Join-Path $env:LOCALAPPDATA "$Client\user.json"),
-        (Join-Path $env:APPDATA "$Client\user.json"),
-        (Join-Path $env:LOCALAPPDATA "$Client\$Client\user.json"),
-        (Join-Path $env:APPDATA "$Client\$Client\user.json")
-    )) { if (Test-Path $c) { return $c } }
 
-    # Then look properly. Both clients use Python's platformdirs, which picks a
-    # different layout per platform and per version, so a fixed list of guesses
-    # WILL eventually be wrong - and reporting "sign-in did not complete" after
-    # a sign-in that plainly succeeded is the worst way to be wrong.
-    foreach ($base in @($env:APPDATA, $env:LOCALAPPDATA, (Join-Path $env:USERPROFILE '.config'))) {
-        if (-not $base -or -not (Test-Path $base)) { continue }
-        $hit = Get-ChildItem -Path $base -Filter 'user.json' -Recurse -Depth 3 -ErrorAction SilentlyContinue |
-               Where-Object { $_.DirectoryName -match [regex]::Escape($Client) } |
-               Select-Object -First 1
-        if ($hit) { return $hit.FullName }
+    # Ask the client itself where it keeps things, rather than guessing.
+    if ($Client -eq 'nile') {
+        $py = Join-Path $root '.venv\Scripts\python.exe'
+        if (Test-Path $py) {
+            $out = $null
+            if (Invoke-Native $py @('-c', 'from nile.constants import CONFIG_PATH; print(CONFIG_PATH)') -Output ([ref]$out)) {
+                $p = ($out | Select-Object -Last 1).ToString().Trim()
+                if ($p -and (Test-Path $p)) { return $p }
+            }
+        }
+    }
+
+    foreach ($c in @(
+        (Join-Path $env:USERPROFILE ".config\$Client"),
+        (Join-Path $env:APPDATA $Client),
+        (Join-Path $env:LOCALAPPDATA $Client),
+        (Join-Path $env:LOCALAPPDATA "$Client\$Client")
+    )) {
+        # A directory that exists but holds no credential is not a hit: nile
+        # creates its folder for the SDK before any sign-in happens.
+        if (Test-Path $c) {
+            $hasCreds = Get-ChildItem $c -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -match '^(user|users|current_user)\.(json|enc)$' -or $_.Name -eq 'user.json' }
+            if ($hasCreds) { return $c }
+        }
     }
     return $null
+}
+
+# Packs a client's configuration directory into one base64 blob for a secret.
+function Get-ConfigArchive {
+    param([string] $Dir)
+    $zip = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-cfg-" + [guid]::NewGuid().ToString('N') + '.zip')
+    try {
+        # Exclude bulk that is not credentials: nile ships ~3MB of SDK DLLs and
+        # legendary caches manifests, neither of which belongs in a secret.
+        $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-stage-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $staging -Force | Out-Null
+        Get-ChildItem $Dir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -lt 512KB } |
+            ForEach-Object { Copy-Item $_.FullName $staging -Force -ErrorAction SilentlyContinue }
+        if (-not (Get-ChildItem $staging -File)) { return $null }
+        Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip -Force
+        return [Convert]::ToBase64String([IO.File]::ReadAllBytes($zip))
+    } finally {
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Ensures the Python virtualenv the Epic and Amazon clients live in.
@@ -270,13 +308,15 @@ if (& $want 'epic') {
         Info 'A browser window will open. Sign in to Epic, then paste the code shown.'
         & $legendary auth
 
-        $cfg = Find-ClientConfig 'legendary'
-        if (-not $cfg) {
-            Warn 'legendary wrote no user.json - the sign-in did not complete.'
+        $dir = Get-ClientConfigDir 'legendary'
+        if (-not $dir) {
+            Warn 'legendary stored no credentials - the sign-in did not complete.'
             Record 'Epic' 'failed' 'no token written'
             return
         }
-        $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($cfg))
+        Info "Found legendary config at $dir"
+        $b64 = Get-ConfigArchive $dir
+        if (-not $b64) { Warn 'Nothing to archive.'; Record 'Epic' 'failed' 'empty config'; return }
         if (Set-Secret 'LEGENDARY_CONFIG' $b64) { Record 'Epic' 'done' } else { Record 'Epic' 'failed' 'secret not saved' }
     }
 }
@@ -314,13 +354,15 @@ if (& $want 'amazon') {
         Info 'A browser window will open. Sign in to Amazon.'
         & $nile auth --login
 
-        $cfg = Find-ClientConfig 'nile'
-        if (-not $cfg) {
-            Warn 'nile wrote no user.json - the sign-in did not complete.'
+        $dir = Get-ClientConfigDir 'nile'
+        if (-not $dir) {
+            Warn 'nile stored no credentials - the sign-in did not complete.'
             Record 'Prime Gaming' 'failed' 'no token written'
             return
         }
-        $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($cfg))
+        Info "Found nile config at $dir"
+        $b64 = Get-ConfigArchive $dir
+        if (-not $b64) { Warn 'Nothing to archive.'; Record 'Prime Gaming' 'failed' 'empty config'; return }
         if (Set-Secret 'NILE_CONFIG' $b64) { Record 'Prime Gaming' 'done' } else { Record 'Prime Gaming' 'failed' 'secret not saved' }
     }
 }

@@ -51,9 +51,30 @@ jobs:
           LEGENDARY_CONFIG: ${{ secrets.LEGENDARY_CONFIG }}
           NILE_CONFIG: ${{ secrets.NILE_CONFIG }}
         run: |
+          # Both secrets are now a base64 ZIP of the client's whole config
+          # directory, not a single file. nile in particular keeps its
+          # credentials in user.enc (AES) with the key derived from an account
+          # id held in a SEPARATE plaintext file, so any single-file copy
+          # captures the ciphertext or the key but never both.
+          restore() {
+            local blob="$1" dest="$2" name="$3"
+            [ -z "$blob" ] && return 0
+            mkdir -p "$dest"
+            echo "$blob" | base64 -d > /tmp/$name.zip 2>/dev/null || {
+              echo "::warning::$name config is not valid base64; skipping."
+              return 1
+            }
+            if unzip -o -q /tmp/$name.zip -d "$dest" 2>/dev/null; then
+              echo "$name config restored:"; ls -1 "$dest"
+            else
+              # Older secrets were a single base64 file rather than a ZIP.
+              echo "$blob" | base64 -d > "$dest/user.json"
+              echo "::warning::$name config was not a ZIP; restored as user.json (re-run finish-setup.ps1 to update it)."
+            fi
+          }
+
           if [ -n "$LEGENDARY_CONFIG" ]; then
-            mkdir -p ~/.config/legendary
-            echo "$LEGENDARY_CONFIG" | base64 -d > ~/.config/legendary/user.json
+            restore "$LEGENDARY_CONFIG" "$HOME/.config/legendary" legendary
             if pip install --user legendary-gl; then
               echo "GAMEVAULT_LEGENDARY_BIN=$HOME/.local/bin/legendary" >> "$GITHUB_ENV"
             else
@@ -61,14 +82,7 @@ jobs:
             fi
           fi
           if [ -n "$NILE_CONFIG" ]; then
-            mkdir -p ~/.config/nile
-            echo "$NILE_CONFIG" | base64 -d > ~/.config/nile/user.json
-            # nile cannot be pip-installed straight from git: its repo uses a
-            # flat layout where `assets/` is discovered as a package alongside
-            # `nile`, and modern setuptools refuses the ambiguity. This is not
-            # platform specific - it fails identically everywhere, and the
-            # `|| true` below used to hide it, producing a silent "nile is not
-            # installed" with no explanation. Naming the real packages fixes it.
+            restore "$NILE_CONFIG" "$HOME/.config/nile" nile
             git clone --depth 1 https://github.com/imLinguin/nile.git /tmp/nile
             printf '\n[tool.setuptools.packages.find]\ninclude = ["nile*"]\n' >> /tmp/nile/pyproject.toml
             if pip install --user /tmp/nile; then
