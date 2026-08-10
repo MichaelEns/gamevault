@@ -191,6 +191,17 @@ footer { padding: 0 24px 30px; color: var(--dim); font-size: 12px; }
   header { padding-bottom: 0; }
 }
 
+/* ---------- pull to refresh ----------
+ * Collapsed to zero height until a pull starts. Sits inside the app shell so
+ * it scrolls with the content rather than floating over the safe area. */
+#ptr {
+  height: 0; overflow: hidden;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: var(--bg); color: var(--dim);
+  font-size: 13px; letter-spacing: .02em;
+}
+#ptr span { padding-bottom: 10px; }
+
 /* ---------- Sources / setup panel ----------
  *
  * Uses the theme variables, never literal colours. An earlier version

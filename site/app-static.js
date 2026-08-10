@@ -265,6 +265,89 @@ $('#setupBtn').addEventListener('click', () => {
   renderSetup();
 });
 
+// A gesture alone is undiscoverable, and there is no gesture on a desktop.
+$('#refreshBtn').addEventListener('click', async () => {
+  const b = $('#refreshBtn');
+  b.disabled = true;
+  b.textContent = 'Refreshing\u2026';
+  await hardRefresh();
+});
+/* ---------- pull to refresh ----------
+ *
+ * iOS standalone PWAs have no browser chrome, so there is no native
+ * pull-to-refresh and no address bar to reload from. When a service worker
+ * served a stale asset there was literally no way for the user to recover
+ * from inside the app. This provides that escape hatch.
+ *
+ * It purges the caches before reloading rather than just calling reload(),
+ * because a plain reload can still be answered from the cache -- which is the
+ * exact situation this exists to break out of. localStorage is untouched, so
+ * a remembered passphrase survives.
+ */
+async function hardRefresh() {
+  try {
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage('gv-purge');
+    }
+    const regs = await navigator.serviceWorker?.getRegistrations?.() ?? [];
+    await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    if (globalThis.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch { /* refreshing must work even if cache APIs are unavailable */ }
+  // Cache-busted so the reload itself cannot be answered from an HTTP cache.
+  location.replace(location.pathname + '?r=' + Date.now());
+}
+
+(function pullToRefresh() {
+  const el = $('#ptr');
+  if (!el) return;
+  const THRESHOLD = 70;      // px of pull before it commits
+  const MAX = 110;           // rubber-band ceiling
+  let startY = 0;
+  let pulling = false;
+  let dist = 0;
+
+  const setText = (t) => { const n = $('#ptrText'); if (n) n.textContent = t; };
+  const reset = () => {
+    el.style.transition = 'height .2s ease';
+    el.style.height = '0px';
+    pulling = false;
+    dist = 0;
+    setTimeout(() => { el.style.transition = ''; }, 220);
+  };
+
+  document.addEventListener('touchstart', (e) => {
+    // Only from a genuine top-of-page position, so this never fights scrolling.
+    if (window.scrollY > 0 || e.touches.length !== 1) return;
+    startY = e.touches[0].clientY;
+    pulling = true;
+    dist = 0;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!pulling) return;
+    const delta = e.touches[0].clientY - startY;
+    if (delta <= 0 || window.scrollY > 0) { reset(); return; }
+    // Resistance, so it feels like a pull rather than a drag.
+    dist = Math.min(MAX, delta * 0.5);
+    el.style.height = `${dist}px`;
+    setText(dist >= THRESHOLD ? 'Release to refresh' : 'Pull to refresh');
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    if (!pulling) return;
+    if (dist >= THRESHOLD) {
+      setText('Refreshing\u2026');
+      el.style.height = `${THRESHOLD}px`;
+      hardRefresh();
+      return;
+    }
+    reset();
+  }, { passive: true });
+})();
+
 function showNotice(msg) {
   const n = $('#notice');
   n.textContent = msg;

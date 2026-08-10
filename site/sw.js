@@ -2,17 +2,28 @@
  * GameVault service worker - static (GitHub Pages) build.
  *
  * All paths are RELATIVE. Pages serves this from a subdirectory, so an
- * absolute '/style.css' would resolve to the domain root and 404 -- which
- * is exactly what broke the first install.
+ * absolute '/style.css' would resolve to the domain root and 404.
  *
- * The app SHELL is cached so the PWA opens instantly and works offline.
- * The SNAPSHOT is not: it is the data you actually want current, and a
- * stale cached copy would silently show old prices. It is fetched
- * network-first, falling back to cache only when genuinely offline.
+ * CACHING STRATEGY -- network-first for everything except images.
+ *
+ * An earlier version was cache-first for the app shell with a fixed cache
+ * name. Both halves of that were wrong: the fixed name meant activate()
+ * never purged anything, and cache-first meant a stale stylesheet beat the
+ * fixed one on the server indefinitely. A deployed fix never reached the
+ * installed app, and with no browser chrome in standalone mode there was no
+ * way for the user to force it.
+ *
+ * The shell is ~60KB and the app already fetches the snapshot from the
+ * network on unlock, so network-first costs almost nothing, and it removes
+ * that entire failure mode. The cache still exists and still serves the app
+ * offline -- it is just no longer authoritative while online.
  */
-const VERSION = 'gv-static-v2';
 
-// Relative to the SW's own scope, which on Pages is /gamevault/.
+// Replaced at deploy time; the workflow fails the build if this placeholder
+// survives, because a constant cache name is what caused the stale-asset bug.
+const BUILD = '__BUILD_ID__';
+const VERSION = `gv-${BUILD}`;
+
 const SHELL = [
   './',
   './index.html',
@@ -41,6 +52,16 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Lets the page trigger a genuine refresh (pull-to-refresh) without having to
+// know the cache name.
+self.addEventListener('message', (event) => {
+  if (event.data === 'gv-purge') {
+    event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))));
+  }
+});
+
+const isImage = (url) => /\.(png|jpg|jpeg|webp|svg|ico)$/i.test(url.pathname);
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -48,38 +69,31 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  const isSnapshot = url.pathname.endsWith('/snapshot.json') ||
-                     url.pathname.endsWith('/snapshot-meta.json');
-
-  if (isSnapshot) {
-    // Network-first: freshness matters more than speed for the data itself.
+  // Icons are content-stable and the most expensive thing to refetch; they are
+  // also the only assets whose staleness cannot mislead anyone.
+  if (isImage(url)) {
     event.respondWith(
-      fetch(request)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(VERSION).then((c) => c.put(request, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => caches.match(request)),   // offline: last known snapshot
+      caches.match(request).then((hit) => hit || fetch(request).then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(request, copy)).catch(() => {});
+        }
+        return res;
+      })),
     );
     return;
   }
 
-  // Shell: cache-first, refreshed in the background.
+  // Everything else: network wins when reachable, cache covers offline.
   event.respondWith(
-    caches.match(request).then((hit) => {
-      const network = fetch(request)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(VERSION).then((c) => c.put(request, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => hit);
-      return hit || network;
-    }),
+    fetch(request)
+      .then((res) => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(request, copy)).catch(() => {});
+        }
+        return res;
+      })
+      .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html'))),
   );
 });

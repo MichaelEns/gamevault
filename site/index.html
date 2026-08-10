@@ -52,6 +52,7 @@
 </div>
 
 <div id="app" class="hidden">
+  <div id="ptr" aria-hidden="true"><span id="ptrText">Pull to refresh</span></div>
   <header>
     <h1>GameVault</h1>
     <p class="tag" id="tag"></p>
@@ -64,6 +65,7 @@
       <button type="submit">Search</button>
     </form>
     <div class="actions">
+      <button id="refreshBtn" class="ghost" title="Check for updates">Refresh</button>
       <button id="setupBtn" class="ghost">Sources</button>
       <button id="lockBtn" class="ghost">Lock</button>
     </div>
@@ -81,6 +83,16 @@
       (location.protocol === 'https:' || location.hostname === 'localhost')) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+
+    // When a new worker takes over, the page is still showing assets from the
+    // old one. Without this reload a deployed fix appears only on the NEXT
+    // launch, which looks exactly like "it was never deployed".
+    var reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (reloading) return;      // guard: controllerchange can fire more than once
+      reloading = true;
+      location.reload();
     });
   }
 </script>

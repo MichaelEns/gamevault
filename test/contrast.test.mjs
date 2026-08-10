@@ -107,6 +107,7 @@ const PAIRS = [
   { name: 'status ok (.panel .ok)',          fg: '--ok-text', bg: '--panel',    min: 4.5 },
   { name: 'status failed (.panel .no)',      fg: '--bad-text', bg: '--panel',   min: 4.5 },
   { name: 'footer text',                     fg: '--dim',     bg: '--bg',       min: 4.5 },
+  { name: 'pull-to-refresh label (#ptr)',    fg: '--dim',     bg: '--bg',       min: 4.5 },
 ];
 
 for (const [themeName, theme] of [['dark', dark], ['light', light]]) {

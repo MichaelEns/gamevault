@@ -111,6 +111,40 @@ try {
   ok(absPrecache.length === 0,
      absPrecache.length ? `sw.js precaches absolute paths: ${absPrecache.join(', ')}` : 'sw.js precache paths are relative');
 
+  console.log('\nThe service worker cannot pin users to a stale build');
+  // A constant cache name meant activate() never purged anything and a
+  // deployed fix never reached the installed app. The name must derive from
+  // a per-build stamp that the workflow substitutes.
+  ok(/const BUILD = '__BUILD_ID__'/.test(swSrc) || /const BUILD = '[^']+'/.test(swSrc),
+     'sw.js declares a BUILD stamp');
+  ok(/const VERSION = `gv-\$\{BUILD\}`/.test(swSrc),
+     'cache name is derived from the build stamp, not a constant');
+  ok(/caches\.keys\(\)[\s\S]*?filter\(\(k\) => k !== VERSION\)[\s\S]*?caches\.delete/.test(swSrc),
+     'activate purges every cache that is not the current build');
+
+  // Cache-first for the shell is what let a stale stylesheet outrank the
+  // fixed one on the server, with no way to recover from inside the app.
+  const fetchHandler = swSrc.slice(swSrc.indexOf("addEventListener('fetch'"));
+  const imgBranch = fetchHandler.slice(fetchHandler.indexOf('isImage(url)'),
+                                       fetchHandler.indexOf('// Everything else'));
+  const restBranch = fetchHandler.slice(fetchHandler.indexOf('// Everything else'));
+  ok(/caches\.match\(request\)/.test(imgBranch), 'images stay cache-first (stale icons mislead nobody)');
+  ok(/^\s*fetch\(request\)/m.test(restBranch), 'everything else is network-first');
+  ok(/\.catch\(\(\) => caches\.match\(request\)/.test(restBranch),
+     'and still falls back to cache when offline');
+  ok(/'gv-purge'/.test(swSrc), 'exposes a purge message so the app can force a refresh');
+
+  console.log('\nThe app can recover from a stale cache without browser chrome');
+  const appSrc = await (await fetch(`${BASE}/app-static.js`)).text();
+  const indexSrc = await (await fetch(`${BASE}/`)).text();
+  ok(/async function hardRefresh/.test(appSrc), 'app implements a hard refresh');
+  ok(/caches\.delete\(k\)/.test(appSrc), 'hard refresh purges caches, not just reload()');
+  ok(/touchmove/.test(appSrc) && /Release to refresh/.test(appSrc),
+     'pull-to-refresh gesture exists (iOS standalone has no native one)');
+  ok(/id="refreshBtn"/.test(indexSrc), 'a visible Refresh control exists too');
+  ok(/controllerchange/.test(indexSrc),
+     'page reloads when a new worker takes over, so a deploy lands immediately');
+
   console.log('\nEvery service-worker precache entry actually exists');
   // addAll() is all-or-nothing: a single 404 (the old '/app.js', which this
   // site never had) makes the whole precache -- and the install -- fail.

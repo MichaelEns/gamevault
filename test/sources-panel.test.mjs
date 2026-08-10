@@ -30,6 +30,7 @@ function makeNode(id) {
   return {
     id,
     innerHTML: '', textContent: '', value: '', checked: false, disabled: false,
+    style: {},
     classList: {
       add: (c) => classes.add(c),
       remove: (c) => classes.delete(c),
@@ -40,12 +41,15 @@ function makeNode(id) {
     focus() {},
   };
 }
-for (const id of ['lock', 'app', 'unlockForm', 'pass', 'remember', 'unlockErr',
-                  'tag', 'q', 'results', 'notice', 'setup', 'setupBtn', 'lockBtn',
-                  'sources', 'freshness', 'searchForm']) {
-  nodes.set(id, makeNode(id));
-}
-// The unlock button is looked up as '#unlockForm button'.
+
+// The element list is derived from the real index.html rather than hand
+// maintained, so the fixture cannot drift out of sync with the markup. That
+// also makes this a genuine check: if app-static.js looks up an element the
+// HTML does not define, $() returns null and the module throws here.
+const indexHtml = await readFile(path.join(PATHS.root, 'site', 'index.html'), 'utf8');
+const ids = [...indexHtml.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+for (const id of ids) nodes.set(id, makeNode(id));
+// Descendant selectors the app uses that are not plain ids.
 nodes.set('unlockForm button', makeNode('unlockFormButton'));
 
 globalThis.document = {

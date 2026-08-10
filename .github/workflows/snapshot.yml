@@ -102,6 +102,20 @@ jobs:
              public/icon-maskable.png public/style.css site/
           cp lib/snapshot-crypto.mjs site/
 
+      - name: Stamp the service-worker cache version
+        # A constant cache name meant activate() never purged anything, so a
+        # deployed fix could sit on the server while the installed app kept
+        # serving the old copy. The cache name must change every build.
+        run: |
+          BUILD_ID="${GITHUB_RUN_NUMBER}-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          sed -i "s/__BUILD_ID__/${BUILD_ID}/g" site/sw.js
+          if grep -q '__BUILD_ID__' site/sw.js; then
+            echo "::error::sw.js build stamp was not applied - caches would never invalidate."
+            exit 1
+          fi
+          grep -n 'const BUILD' site/sw.js
+          echo "Service worker stamped as ${BUILD_ID}."
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
