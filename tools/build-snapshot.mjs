@@ -198,14 +198,15 @@ async function main() {
   if (ENV.EA_REMID && ENV.GAMEVAULT_SECRETS_TOKEN) {
     try {
       const ea = await import('../lib/ea.mjs');
-      if (ea.rotatedRemid && ea.rotatedRemid !== ENV.EA_REMID) {
+      const fresh = ea.currentCookies(ENV);
+      if (fresh.remid && fresh.remid !== ENV.EA_REMID) {
         const [{ putSecret }, nacl, blakejs] = await Promise.all([
           import('../lib/github-secrets.mjs'),
           import('tweetnacl').then((m) => m.default ?? m),
           import('blakejs'),
         ]);
         const repo = ENV.GITHUB_REPOSITORY;
-        await putSecret(ENV.GAMEVAULT_SECRETS_TOKEN, repo, 'EA_REMID', ea.rotatedRemid,
+        await putSecret(ENV.GAMEVAULT_SECRETS_TOKEN, repo, 'EA_REMID', fresh.remid,
                         { nacl, blake2b: blakejs.blake2b });
         console.log('  EA issued a replacement cookie; EA_REMID updated.');
       }

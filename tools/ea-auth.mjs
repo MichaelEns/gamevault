@@ -53,8 +53,10 @@ console.log('   Seeing JSON with "access_token" means you are signed in.');
 console.log('   Seeing "login_required" means you are not - sign in and retry.');
 console.log('   Visiting it also makes accounts.ea.com appear in the cookie list.\n');
 console.log('3. Press F12 -> Application -> Cookies -> https://accounts.ea.com');
-console.log('4. Copy the Value of the cookie named  remid\n');
-console.log('A bare value or the whole cookie string both work.\n');
+console.log('4. Copy the Value of BOTH cookies:  remid  and  sid\n');
+console.log('remid is the long-lived "remember me" value; sid is the session it');
+console.log('mints. Supplying only remid asks EA to create a session on every');
+console.log('call, which it will not reliably do.\n');
 
 let remid = await ask('remid cookie value: ');
 
@@ -84,11 +86,20 @@ if (remid.length < 20) {
   process.exit(1);
 }
 
+let sid = await ask('sid cookie value (press Enter to skip): ');
+const sidMatch = sid.match(/\bsid=([^;\s]+)/);
+if (sidMatch) sid = sidMatch[1];
+if (sid.startsWith('"') && sid.endsWith('"')) sid = sid.slice(1, -1);
+if (!sid) {
+  console.log('\nNo sid given. Trying with remid alone - if this fails with');
+  console.log('login_required, go back and copy sid as well.');
+}
+
 console.log('\nVerifying with EA...');
 try {
   // One pass: whoami and the library share a single token, because EA will
   // not issue a second one from the same session in quick succession.
-  const { player, games } = await ea.verify({ EA_REMID: remid });
+  const { player, games } = await ea.verify({ EA_REMID: remid, EA_SID: sid || undefined });
   if (!player?.displayName) {
     console.error('EA accepted the cookie but returned no player. Response: ' + JSON.stringify(player));
     process.exit(1);
@@ -100,29 +111,40 @@ try {
     console.log('For example: ' + games.slice(0, 3).map((g) => g.title).join(', '));
   }
 
-  // EA rotates remid when it is used, so the value that just worked may
-  // already be spent. Storing the spent one is what made the previous attempt
-  // authenticate successfully and then fail on the very next run.
-  const toStore = ea.rotatedRemid ?? remid;
-  if (ea.rotatedRemid) {
-    console.log('\nEA issued a replacement cookie during this check, which is why');
-    console.log('a stored value can work once and then stop. The replacement is');
-    console.log('what gets saved below.');
+  const cookies = ea.currentCookies({ EA_REMID: remid, EA_SID: sid || undefined });
+  if (cookies.remid !== remid) {
+    console.log('\nEA issued a replacement remid during this check; that is what');
+    console.log('gets saved below.');
   }
 
   console.log('\nAdd this as the EA_REMID secret:\n');
-  console.log(toStore);
-  emit(toStore);
-  console.log('\nEA rotates this cookie as it is used, so it will need refreshing');
-  console.log('from time to time. If EA ownership stops updating, run this again.');
+  console.log(cookies.remid);
+  emit(cookies.remid);
+
+  if (cookies.sid) {
+    console.log('\nAnd add this as the EA_SID secret:\n');
+    console.log(cookies.sid);
+  }
+  console.log('\nIf EA ownership stops updating later, run this again.');
 } catch (e) {
   console.error('\nFailed: ' + e.message);
+
+  // Print what EA actually said. Two separate guesses about this failure have
+  // already been wrong, and a guess dressed up as advice wastes the user's
+  // time far more than an honest dump of the exchange does.
+  const x = ea.lastExchange;
+  if (x) {
+    console.error('\nWhat EA returned, for diagnosis:');
+    console.error(`  HTTP status      : ${x.status}`);
+    console.error(`  cookies sent     : ${x.sentCookies.join(', ') || '(none)'}`);
+    console.error(`  cookies received : ${x.receivedCookies.join(', ') || '(none)'}`);
+    console.error(`  body             : ${x.body}`);
+  }
+
   if (/login_required/.test(e.message)) {
-    console.error('\nEA rotates remid when it is used, so a cookie that worked a moment');
-    console.error('ago may already be spent. Reload accounts.ea.com in the browser and');
-    console.error('copy the CURRENT value of remid, then run this again.');
-  } else {
-    console.error('\nCheck you copied `remid` from accounts.ea.com and not `sid`.');
+    console.error('\nMost likely fix: supply the sid cookie as well as remid.');
+    console.error('Both are on accounts.ea.com under F12 -> Application -> Cookies.');
+    console.error('If "cookies sent" above shows only remid, that is the thing to change.');
   }
   process.exit(1);
 }
