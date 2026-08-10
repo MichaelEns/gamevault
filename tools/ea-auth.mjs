@@ -86,14 +86,15 @@ if (remid.length < 20) {
 
 console.log('\nVerifying with EA...');
 try {
-  const player = await ea.whoami({ EA_REMID: remid });
+  // One pass: whoami and the library share a single token, because EA will
+  // not issue a second one from the same session in quick succession.
+  const { player, games } = await ea.verify({ EA_REMID: remid });
   if (!player?.displayName) {
     console.error('EA accepted the cookie but returned no player. Response: ' + JSON.stringify(player));
     process.exit(1);
   }
   console.log(`Signed in as ${player.displayName}`);
 
-  const games = await ea.ownedGames({ EA_REMID: remid });
   console.log(`Found ${games.length} owned EA games.`);
   if (games.length) {
     console.log('For example: ' + games.slice(0, 3).map((g) => g.title).join(', '));
