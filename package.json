@@ -16,6 +16,7 @@
     "docker:up": "docker compose up -d",
     "probe": "node test/live-probe.mjs",
     "verify-subs": "node test/gp-verify.mjs",
+    "gog-auth": "node tools/gog-auth.mjs",
     "epic-claim-auth": "node tools/epic-claim-auth.mjs",
     "epic-auth": ".venv\\Scripts\\legendary auth",
     "epic-status": ".venv\\Scripts\\legendary status",

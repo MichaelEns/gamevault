@@ -238,31 +238,43 @@ async function main() {
   }
 
   let attempts = [];
-  const epicClaim = await import('../lib/epic-claim.mjs');
-  if (epicClaim.configured(ENV) && freebies.some((f) => f.worthClaiming)) {
+  const claimers = {
+    epic: await import('../lib/epic-claim.mjs'),
+    gog: await import('../lib/gog-claim.mjs'),
+  };
+  const claimable = freebies.filter((f) => f.worthClaiming);
+
+  if (claimable.length) {
     console.log('');
     console.log('4e. Claiming free games');
-    // Never re-attempt something already being tracked, or a failed claim
-    // would be retried on every single build.
+    // Never re-attempt something already tracked, or a failed claim would be
+    // retried on every single build.
     const tracked = new Set(previousLog.filter((e) => !e.giveUp).map((e) => e.norm));
-    const todo = freebies.filter((f) => f.worthClaiming && !tracked.has(f.norm));
-    if (!todo.length) log('nothing new to claim');
 
-    const results = await epicClaim.claimAll(ENV, todo).catch((e) => {
-      log(`claiming failed: ${e.message}`);
-      return [];
-    });
-    for (const r of results) {
-      log(`${r.game.title} - ${r.note}`);
-      // An already-owned game is not a failure and must not be recorded as
-      // one; it also does not need verifying.
-      if (!r.alreadyOwned) {
-        attempts.push(claimsMod.recordAttempt(r.game, { ok: r.ok, error: r.ok ? null : r.note }));
+    for (const [store, mod] of Object.entries(claimers)) {
+      const todo = claimable.filter((f) => f.store === store && !tracked.has(f.norm));
+      if (!todo.length) continue;
+      if (!mod.configured(ENV)) {
+        log(`${todo.length} free on ${store}, but it is not set up for claiming`);
+        continue;
+      }
+      for (const game of todo) {
+        try {
+          await mod.claim(ENV, game);
+          log(`${game.title} (${store}) - claimed`);
+          attempts.push(claimsMod.recordAttempt(game, { ok: true }));
+        } catch (e) {
+          // Already owned is not a failure and must not be recorded as one.
+          if (e.alreadyOwned) { log(`${game.title} (${store}) - already owned`); continue; }
+          log(`${game.title} (${store}) - FAILED: ${e.message}`);
+          attempts.push(claimsMod.recordAttempt(game, { ok: false, error: e.message }));
+        }
+        // Paced deliberately: there is no throughput to gain from bursts, and
+        // a burst of purchase requests is the pattern worth avoiding.
+        await new Promise((r) => setTimeout(r, 3000));
       }
     }
-  } else if (freebies.some((f) => f.worthClaiming)) {
-    console.log('');
-    log('free games available but EPIC_COOKIES is not set, so nothing was claimed');
+    if (!attempts.length) log('nothing new to claim');
   }
 
   const claimLog = claimsMod.nextLog({ pending: outcome.pending, failed: outcome.failed, attempts });
@@ -292,6 +304,11 @@ async function main() {
     try {
       const ubiMod = await import('../lib/ubisoft.mjs');
       if (ubiMod.rotatedTicket) rotations.push(['UBISOFT_REMEMBER_TICKET', ubiMod.rotatedTicket]);
+    } catch { /* Ubisoft not configured */ }
+    try {
+      // GOG issues a new refresh token on every use and retires the old one.
+      const gogMod = await import('../lib/gog-claim.mjs');
+      if (gogMod.rotatedToken) rotations.push(['GOG_REFRESH_TOKEN', gogMod.rotatedToken]);
     } catch { /* Ubisoft not configured */ }
 
     if (rotations.length) {

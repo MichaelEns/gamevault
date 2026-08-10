@@ -147,6 +147,9 @@ jobs:
           # payment host is involved and it is auth-gated rather than
           # bot-protected, so no browser impersonation is needed.
           EPIC_COOKIES: ${{ secrets.EPIC_COOKIES }}
+          # GOG giveaways. Rotates its refresh token on every use, so it needs
+          # GAMEVAULT_SECRETS_TOKEN to keep working past one build.
+          GOG_REFRESH_TOKEN: ${{ secrets.GOG_REFRESH_TOKEN }}
           # Used to fetch the previous snapshot, so the claim log survives
           # between builds and last week's claims can be verified.
           SITE_URL: ${{ vars.SITE_URL }}
