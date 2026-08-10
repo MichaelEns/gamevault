@@ -1,0 +1,118 @@
+name: Claim free games (browser)
+
+# Deliberately separate from the snapshot build.
+#
+# This drives a real browser, which is the only way into Amazon Prime Gaming -
+# gaming.amazon.com answers 403 to anything that does not look like one. That
+# makes it the most fragile part of the project: it depends on page markup and
+# breaks when a storefront redesigns.
+#
+# Keeping it in its own workflow means such a break cannot disturb the library
+# sync, which has to keep working regardless. It also keeps a ~300MB browser
+# download out of the six-hourly build.
+
+on:
+  schedule:
+    # Daily rather than six-hourly. Prime Gaming offers last days, Epic's last
+    # a week, and running a browser more often than the offers change is cost
+    # without benefit.
+    - cron: '30 9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: browser-claim
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    # A hung browser must not sit consuming a runner: the whole job is bounded.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: |
+          npm ci --omit=dev --no-audit --no-fund
+          npm install --no-save playwright
+          npx playwright install chromium --with-deps
+
+      - name: Claim
+        env:
+          BROWSER_STATE: ${{ secrets.BROWSER_STATE }}
+          GAMEVAULT_SECRETS_TOKEN: ${{ secrets.GAMEVAULT_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node tools/browser-claim.mjs
+
+      - name: Keep the evidence when something goes wrong
+        # Page markup changes are far easier to diagnose from a screenshot than
+        # from a selector that matched nothing.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-debug
+          path: |
+            claim-result.json
+            *.png
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Report a broken session
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ -f claim-result.json ] || exit 0
+          FAILURES=$(node -e "
+            const r=require('./claim-result.json');
+            process.stdout.write(String((r.failures||[]).length));
+          ")
+          [ "$FAILURES" = "0" ] && { echo "No failures."; exit 0; }
+
+          DETAIL=$(node -e "
+            const r=require('./claim-result.json');
+            process.stdout.write((r.failures||[]).map(f=>'- **'+f.label+'**: '+f.error).join('\n'));
+          ")
+
+          # One open issue at a time. A daily job that reopens an issue every
+          # day teaches you to ignore it, which defeats the point of notifying.
+          EXISTING=$(gh issue list --state open --label claim-session --json number --jq 'length')
+          if [ "$EXISTING" != "0" ]; then
+            echo "An issue is already open; not opening another."
+            exit 0
+          fi
+
+          gh label create claim-session --color d73a4a \
+            --description "A storefront session used for claiming has expired" 2>/dev/null || true
+          gh issue create \
+            --title "GameVault: automatic claiming needs attention" \
+            --label claim-session \
+            --body "The daily claim run could not complete for one or more storefronts.
+
+          $DETAIL
+
+          If this says the session has expired, sign in again on a PC:
+
+          \`\`\`
+          npm run browser-login
+          gh secret set BROWSER_STATE --repo ${{ github.repository }}
+          \`\`\`
+
+          Close this issue once it is sorted - it will not be reopened while it stays open."
+
+      - name: Rebuild the snapshot so claims can be verified
+        # The library sync is what proves a claim actually arrived. Triggering
+        # it here means verification happens promptly rather than at the next
+        # six-hourly build.
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run snapshot.yml --ref main || true
