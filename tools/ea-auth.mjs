@@ -43,10 +43,18 @@ function ask(question) {
 }
 
 console.log('EA sign-in (one time)\n');
+console.log('The cookie lives on accounts.ea.com, NOT on www.ea.com - looking');
+console.log('under ea.com and finding nothing is the expected result.\n');
 console.log('1. Sign in at https://www.ea.com in your browser.');
-console.log('2. Open developer tools (F12) -> Application -> Cookies -> https://www.ea.com');
-console.log('3. Find the cookie named  remid  and copy its Value.\n');
-console.log('If you paste the whole cookie string, only remid is used.\n');
+console.log('2. In the SAME browser, open this URL:\n');
+console.log('     https://accounts.ea.com/connect/auth?client_id=ORIGIN_JS_SDK' +
+            '&response_type=token&redirect_uri=nucleus:rest&prompt=none\n');
+console.log('   Seeing JSON with "access_token" means you are signed in.');
+console.log('   Seeing "login_required" means you are not - sign in and retry.');
+console.log('   Visiting it also makes accounts.ea.com appear in the cookie list.\n');
+console.log('3. Press F12 -> Application -> Cookies -> https://accounts.ea.com');
+console.log('4. Copy the Value of the cookie named  remid\n');
+console.log('A bare value or the whole cookie string both work.\n');
 
 let remid = await ask('remid cookie value: ');
 
@@ -54,9 +62,25 @@ let remid = await ask('remid cookie value: ');
 // out of devtools is the more likely action.
 const match = remid.match(/remid=([^;\s]+)/);
 if (match) remid = match[1];
+if (remid.startsWith('"') && remid.endsWith('"')) remid = remid.slice(1, -1);
 
 if (!remid) {
   console.error('No value entered.');
+  process.exit(1);
+}
+
+// Pasting the access_token is the most likely wrong answer, because step 2
+// puts one on screen. It is not interchangeable: it expires within hours, so
+// storing it would appear to work today and quietly stop working tomorrow.
+if (remid.startsWith('{') || /access_token/.test(remid)) {
+  console.error('\nThat looks like the JSON from step 2 rather than the cookie.');
+  console.error('The access_token in it expires within hours, so it cannot be stored.');
+  console.error('Use F12 -> Application -> Cookies -> accounts.ea.com and copy "remid".');
+  process.exit(1);
+}
+if (remid.length < 20) {
+  console.error(`\nThat is ${remid.length} characters, which is too short for remid.`);
+  console.error('Check you copied the Value column rather than the Name.');
   process.exit(1);
 }
 

@@ -11,6 +11,7 @@
  * a free game. Neither is acceptable, so both are pinned here.
  */
 import { epicFreeGames, annotateOwnership, timeLeft } from '../lib/freebies.mjs';
+import { normalizeTitle } from '../lib/match.mjs';
 
 let fails = 0;
 const ok = (cond, msg) => {
@@ -111,14 +112,30 @@ ok(bp.url.includes('beacon-pines-629fc3'), `slug resolved: ${bp.url}`);
 ok(Boolean(bp.namespace && bp.offerId), 'namespace and offer id captured');
 
 console.log('\nOwned on THAT store -> nothing to do');
-const index = {
-  'we were here together': { epic: true },
-  celeste: { steam: true },
+// The index shape is NOT invented here. lib/library.mjs builds it as
+//   normalised title -> [ { store, title, id, url }, ... ]
+// and an earlier version of this test made one up instead, which is exactly
+// why the real bug shipped: reading an array with Object.keys() yields ["0"],
+// so nothing ever matched and every giveaway was reported as unowned.
+// Built the same way library.mjs builds it, from store records.
+const STORES = {
+  epic: { games: [{ title: 'We Were Here Together', id: '1', url: 'x' }] },
+  steam: { games: [{ title: 'Celeste', id: '2', url: 'y' }] },
 };
+const index = {};
+for (const [storeName, rec] of Object.entries(STORES)) {
+  for (const g of rec.games) {
+    const key = normalizeTitle(g.title);
+    (index[key] ??= []).push({ store: storeName, title: g.title, id: g.id, url: g.url });
+  }
+}
+ok(Array.isArray(index['celeste']), 'the index really is an array per title, as library.mjs builds it');
+
 const annotated = annotateOwnership(free, index);
 const wwht = annotated.find((g) => g.title === 'We Were Here Together');
 ok(wwht.ownedHere === true, 'recognised as already owned on Epic');
 ok(wwht.worthClaiming === false, 'and therefore not worth claiming');
+ok(wwht.ownedElsewhere.length === 0, 'and no bogus store names leak in');
 
 console.log('\nOwned on ANOTHER store -> still worth claiming');
 // The rule most easily got backwards: a Steam copy is no reason to decline a
