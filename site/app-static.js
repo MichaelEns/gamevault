@@ -180,6 +180,7 @@ async function unlockWith(passphrase) {
     renderSetup();
   }
   renderFreebies();
+  renderKeys();
   $('#q').focus();
 }
 
@@ -397,6 +398,60 @@ function renderFreebies() {
     <h2 class="free-title">Free to keep &mdash; ${worth.length} you don&rsquo;t have</h2>
     <ul class="free-list">${rows}</ul>
     <p class="free-foot">Claim once and it is yours permanently.</p>`;
+  box.classList.remove('hidden');
+}
+
+/* ---------- unredeemed Humble keys ----------
+ *
+ * Shown without being asked for, like the giveaways, because an unredeemed key
+ * is invisible in every library until it is redeemed - which is precisely when
+ * someone buys the game a second time.
+ *
+ * Deliberately two lists rather than one. A key for a game you already own is
+ * worth MORE unrevealed: revealing it produces a duplicate and ends the only
+ * thing it could still do, which is be given to someone. Presenting a single
+ * "redeem these" list would quietly advise burning the valuable ones.
+ */
+function renderKeys() {
+  const box = $('#keys');
+  if (!box) return;
+  const k = SNAP?.keys;
+  const worth = k?.worthRedeeming ?? [];
+  const giftable = k?.keepGiftable ?? [];
+
+  if (!worth.length && !giftable.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+
+  const item = (g, note) => `<li>
+      ${esc(g.title)}
+      ${g.keyType ? `<span class="free-time">${esc(g.keyType)}</span>` : ''}
+      ${g.bundle ? `<span class="free-note">from ${esc(g.bundle)}</span>` : ''}
+      ${note ? `<span class="free-note">${note}</span>` : ''}
+    </li>`;
+
+  const worthHtml = worth.length ? `
+    <h2 class="free-title">Unredeemed keys worth redeeming &mdash; ${worth.length}</h2>
+    <p class="free-foot" style="margin:0 0 8px">
+      You own these nowhere else, so nothing can tell you about them until they
+      are redeemed.
+    </p>
+    <ul class="free-list">${worth.map((g) => item(g)).join('')}</ul>
+    <p class="free-foot">
+      <a href="https://www.humblebundle.com/home/keys?filter=unredeemed" target="_blank" rel="noopener">Humble keys</a>
+      &rarr;
+      <a href="https://store.steampowered.com/account/registerkey" target="_blank" rel="noopener">activate on Steam</a>.
+      A few at a time: Steam locks activation after about ten failed attempts.
+    </p>` : '';
+
+  const giftHtml = giftable.length ? `
+    <h2 class="free-title" style="margin-top:14px">Keep as they are &mdash; ${giftable.length}</h2>
+    <p class="free-foot" style="margin:0 0 8px">
+      Already owned elsewhere. Revealing these makes a duplicate and ends the
+      one thing they can still do &mdash; be given away.
+    </p>
+    <ul class="free-list">${giftable.map((g) =>
+      item(g, `already owned on ${esc(g.ownedOn.join(', '))}`)).join('')}</ul>` : '';
+
+  box.innerHTML = worthHtml + giftHtml;
   box.classList.remove('hidden');
 }
 

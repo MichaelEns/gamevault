@@ -190,6 +190,35 @@ async function main() {
   }
   if (!freebies.length) log('nothing free right now');
 
+  // ---- 4c. Unredeemed Humble keys ----------------------------------------
+  // Computed here rather than in a separate tool, because everything needed is
+  // already in hand: the Humble library and the ownership index. An unredeemed
+  // key is invisible in every library until it is redeemed, which is exactly
+  // when someone buys the game a second time.
+  const humbleGames = library.stores?.humble?.games ?? [];
+  const unredeemedKeys = humbleGames.filter((g) => g.unredeemed);
+  const keys = { worthRedeeming: [], keepGiftable: [] };
+  for (const g of unredeemedKeys) {
+    const entries = (library.index ?? {})[normalizeTitle(g.title)];
+    const owners = [...new Set(
+      (Array.isArray(entries) ? entries : [])
+        .map((e) => e?.store)
+        // Humble itself must not count: every unredeemed key is in the Humble
+        // library by definition, so counting it would mark them all redundant.
+        .filter((s) => s && s !== 'humble'),
+    )];
+    const entry = { title: g.title, bundle: g.bundle ?? null, keyType: g.keyType ?? null, ownedOn: owners };
+    // A key for a game you already own is worth MORE unrevealed: revealing it
+    // makes a duplicate and ends the one thing it could still do, be gifted.
+    if (owners.length) keys.keepGiftable.push(entry);
+    else keys.worthRedeeming.push(entry);
+  }
+  if (unredeemedKeys.length) {
+    console.log('');
+    console.log('4c. Unredeemed Humble keys');
+    log(`${keys.worthRedeeming.length} worth redeeming, ${keys.keepGiftable.length} worth keeping giftable`);
+  }
+
   // ---- 5. Assemble -------------------------------------------------------
   // Some providers hand out rotating credentials: EA replaces its remid
   // cookie, Ubisoft issues a new remember-me ticket, and in both cases the old
@@ -252,6 +281,7 @@ async function main() {
     stores,
     providers,
     freebies,
+    keys,
     // The index maps normalised title -> where you own it.
     index: library.index ?? {},
     subs,

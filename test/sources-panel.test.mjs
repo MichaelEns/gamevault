@@ -83,7 +83,8 @@ const hooked = src.replace(
   'globalThis.__setSnap = (s) => { SNAP = s; };\n' +
   'globalThis.__setLive = (m) => { LIVE_SECRETS = m; };\n' +
   'globalThis.__pushSource = (s) => { SOURCES.push(s); };\n' +
-  'globalThis.__popSource = () => { SOURCES.pop(); };\n',
+  'globalThis.__popSource = () => { SOURCES.pop(); };\n' +
+  'globalThis.__renderKeys = renderKeys;\n',
 );
 // Written beside the original so its relative import of ./snapshot-crypto.mjs
 // still resolves; a data: URL cannot resolve relative specifiers.
@@ -282,6 +283,47 @@ const dead = SOURCES_FOR_TEST_UNAVAILABLE();
 ok(dead.includes('unavailable'), 'a source marked unavailable still renders as such');
 ok(!dead.includes('rebuild pending'),
    'and is never called pending, which would imply waiting helps');
+
+console.log('\nUnredeemed keys are split, not lumped into one "redeem these" list');
+// Presenting a single list would advise burning the keys worth keeping: a key
+// for a game already owned is worth more unrevealed, because it can be gifted.
+globalThis.__setSnap({
+  builtAt: BUILT,
+  counts: { owned: 1400, subscriptions: 1812, priced: 71 },
+  entitled: ['pc'],
+  stores: {},
+  providers: {},
+  keys: {
+    worthRedeeming: [{ title: 'Tunic', bundle: 'Humble Choice', keyType: 'steam', ownedOn: [] }],
+    keepGiftable: [{ title: 'Hollow Knight', bundle: 'Bundle A', keyType: 'steam', ownedOn: ['steam'] }],
+  },
+});
+globalThis.__renderKeys();
+const keysHtml = nodes.get('keys').innerHTML;
+ok(keysHtml.includes('Tunic'), 'a key for a game owned nowhere is listed as worth redeeming');
+ok(keysHtml.includes('Hollow Knight'), 'a key for a game already owned is still shown');
+ok(/already owned on steam/.test(keysHtml), 'and says where it is owned');
+ok(keysHtml.indexOf('worth redeeming') < keysHtml.indexOf('Keep as they are'),
+   'the actionable list comes first');
+ok(/ten failed attempts/.test(keysHtml),
+   'and Steam\'s activation limit is stated, since bulk activation risks the account');
+
+console.log('\nNothing is shown when there are no unredeemed keys');
+globalThis.__setSnap({
+  builtAt: BUILT, counts: { owned: 10, subscriptions: 0, priced: 0 },
+  entitled: [], stores: {}, providers: {}, keys: { worthRedeeming: [], keepGiftable: [] },
+});
+globalThis.__renderKeys();
+ok(nodes.get('keys')._classes.has('hidden'), 'the panel hides itself rather than showing an empty box');
+
+console.log('\nAn older snapshot without key data does not break the app');
+globalThis.__setSnap({
+  builtAt: BUILT, counts: { owned: 10, subscriptions: 0, priced: 0 },
+  entitled: [], stores: {}, providers: {},
+});
+let threwKeys = null;
+try { globalThis.__renderKeys(); } catch (e) { threwKeys = e; }
+ok(threwKeys === null, threwKeys ? `threw: ${threwKeys.message}` : 'no exception when keys are absent');
 
 console.log('\nMarkup is escaped (store errors are attacker-adjacent text)');globalThis.__setSnap({
   builtAt: new Date().toISOString(),
