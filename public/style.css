@@ -6,7 +6,15 @@
   --text: #e6e9ef;
   --dim: #98a2b3;
   --accent: #6ea8ff;
-
+  /* --accent is a SURFACE colour (button fills, focus rings) and carries dark
+   * text on top of it. --link is a TEXT colour and has to stay readable
+   * against the page. They are separate because light mode needs to darken
+   * one and not the other: darkening --accent would put near-black button
+   * text on a dark blue button. */
+  --link: #6ea8ff;
+  --ok-text: #22c55e;
+  --bad-text: #fca5a5;
+  --cheap-bg: #16241a;
   --owned: #8b5cf6;
   --included: #22c55e;
   --best: #16a34a;
@@ -23,9 +31,15 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* The viewport meta uses viewport-fit=cover with a translucent status bar,
+   * so the page really does extend under the Dynamic Island and the home
+   * indicator. Without these insets the <h1> renders behind the island. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
-header { padding: 28px 24px 8px; }
+header { padding: 28px 24px 8px; padding-top: calc(28px + env(safe-area-inset-top)); }
 h1 { margin: 0; font-size: 26px; letter-spacing: -0.4px; }
 .tag { margin: 4px 0 0; color: var(--dim); font-size: 14px; }
 
@@ -63,10 +77,10 @@ button:disabled { opacity: .55; cursor: default; }
   background: var(--panel); border: 1px solid var(--line); font-size: 14px;
 }
 .panel h3 { margin: 0 0 10px; font-size: 14px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-.panel .row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid #222a37; }
+.panel .row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid var(--line); }
 .panel .row:last-child { border-bottom: 0; }
-.panel .ok { color: #4ade80; }
-.panel .no { color: #fca5a5; }
+.panel .ok { color: var(--ok-text); }
+.panel .no { color: var(--bad-text); }
 
 #results { padding: 0 24px 40px; display: grid; gap: 12px; }
 
@@ -87,7 +101,7 @@ button:disabled { opacity: .55; cursor: default; }
 .verdict {
   font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 999px; white-space: nowrap;
-  background: #232b3a; color: var(--text);
+  background: var(--panel2); color: var(--text);
 }
 .v-owned .verdict { background: #3b2a63; color: #d8c9ff; }
 .v-included .verdict { background: #123a24; color: #a7f3c9; }
@@ -109,17 +123,17 @@ button:disabled { opacity: .55; cursor: default; }
 .prices { margin-top: 12px; display: grid; gap: 4px; }
 .price-row {
   display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
-  padding: 5px 8px; border-radius: 6px; background: #141924; font-size: 14px;
+  padding: 5px 8px; border-radius: 6px; background: var(--panel2); font-size: 14px;
 }
-.price-row.cheapest { background: #16241a; }
+.price-row.cheapest { background: var(--cheap-bg); }
 .shop { color: var(--dim); }
 .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
-.cut { color: #86efac; font-variant-numeric: tabular-nums; }
-a { color: var(--accent); text-decoration: none; }
+.cut { color: var(--ok-text); font-variant-numeric: tabular-nums; }
+a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .lowline { margin-top: 8px; font-size: 13px; color: var(--dim); }
-footer { padding: 0 24px 30px; color: #5c6675; font-size: 12px; }
+footer { padding: 0 24px 30px; color: var(--dim); font-size: 12px; }
 .spin { color: var(--dim); padding: 10px 24px; }
 
 /* ---------- iPhone / small screens ----------
@@ -177,6 +191,42 @@ footer { padding: 0 24px 30px; color: #5c6675; font-size: 12px; }
   header { padding-bottom: 0; }
 }
 
+/* ---------- Sources / setup panel ----------
+ *
+ * Uses the theme variables, never literal colours. An earlier version
+ * hardcoded dark hexes here; because this block sits AFTER the light-mode
+ * media query it overrode the theme entirely, painting dark cards behind
+ * the light theme's near-black text. Anything that sets a background here
+ * must take its text colour from the same source.
+ */
+.setup-title { font-size: 16px; margin: 18px 0 6px; color: var(--text); }
+.setup-intro, .setup-foot {
+  font-size: 13px; color: var(--dim); line-height: 1.5; margin: 0 0 14px;
+}
+.setup-foot { margin-top: 14px; }
+.src {
+  border: 1px solid var(--line); border-left-width: 3px;
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+.src.ok   { border-left-color: var(--included); }
+.src.warn { border-left-color: var(--meh); }
+.src.off  { border-left-color: var(--unknown); }
+.src-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.src-head strong { color: var(--text); }
+.src-badge { font-size: 12px; color: var(--dim); white-space: nowrap; }
+.src.ok .src-badge { color: var(--ok-text); }
+.src-unlocks { font-size: 13px; margin: 4px 0 6px; color: var(--text); }
+.src-note { font-size: 12px; color: var(--dim); margin: 6px 0 0; line-height: 1.45; }
+.src-links { font-size: 13px; margin: 8px 0 0; }
+.src-links a { color: var(--link); }
+.src code {
+  font-size: 11px; background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 4px; padding: 1px 5px; margin-right: 4px;
+  color: var(--text);
+}
+
 /* Respect the OS light theme rather than forcing dark on a bright phone. */
 @media (prefers-color-scheme: light) {
   :root {
@@ -186,33 +236,13 @@ footer { padding: 0 24px 30px; color: #5c6675; font-size: 12px; }
     --line: #d6dbe3;
     --text: #131720;
     --dim: #5b6472;
+    /* #6ea8ff is only 2.41:1 on white -- unreadable. --accent keeps its
+     * value because it is a button FILL here, not text. */
+    --link: #1d4ed8;
+    --ok-text: #137333;
+    --bad-text: #b42318;
+    --cheap-bg: #e4f3e8;
   }
-  .price-row { background: #eef1f5; }
-  .price-row.cheapest { background: #e4f3e8; }
+  .price-row.cheapest { background: var(--cheap-bg); }
   button { color: #08111f; }
-}
-
-/* ---------- Sources / setup panel ---------- */
-.setup-title { font-size: 16px; margin: 18px 0 6px; }
-.setup-intro, .setup-foot {
-  font-size: 13px; color: var(--dim); line-height: 1.5; margin: 0 0 14px;
-}
-.setup-foot { margin-top: 14px; }
-.src {
-  border: 1px solid #22262f; border-left-width: 3px;
-  border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
-  background: #161a22;
-}
-.src.ok   { border-left-color: #3fb950; }
-.src.warn { border-left-color: #d29922; }
-.src.off  { border-left-color: #444b57; }
-.src-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.src-badge { font-size: 12px; color: var(--dim); white-space: nowrap; }
-.src.ok .src-badge { color: #3fb950; }
-.src-unlocks { font-size: 13px; margin: 4px 0 6px; }
-.src-note { font-size: 12px; color: var(--dim); margin: 6px 0 0; line-height: 1.45; }
-.src-links { font-size: 13px; margin: 8px 0 0; }
-.src code {
-  font-size: 11px; background: #0e1117; border: 1px solid #22262f;
-  border-radius: 4px; padding: 1px 5px; margin-right: 4px;
 }
