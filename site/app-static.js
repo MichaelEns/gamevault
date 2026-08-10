@@ -16,6 +16,22 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
 
 let SNAP = null;
 
+/**
+ * "Remember on this device".
+ *
+ * Opt-in, and off by default. Storing the passphrase means anyone who can
+ * unlock your phone can read your library -- which is a reasonable trade
+ * when the phone itself is behind Face ID, but it should be your choice,
+ * not a default. Scoped to this origin, and cleared by Lock or Forget.
+ */
+const REMEMBER_KEY = 'gv.passphrase';
+const remembered = () => {
+  try { return localStorage.getItem(REMEMBER_KEY); } catch { return null; }
+};
+const forget = () => {
+  try { localStorage.removeItem(REMEMBER_KEY); } catch { /* private mode */ }
+};
+
 const money = (a, c) =>
   a === null || a === undefined ? '—' : `${!c || c === 'USD' ? '$' : ''}${Number(a).toFixed(2)}${c && c !== 'USD' ? ' ' + c : ''}`;
 
@@ -46,43 +62,72 @@ try {
   $('#freshness').textContent = 'No snapshot found yet. Run the sync workflow.';
 }
 
+async function unlockWith(passphrase) {
+  const envelope = await (await fetch('./snapshot.json', { cache: 'no-cache' })).json();
+  SNAP = envelope.format === 'gamevault-plain-snapshot'
+    ? envelope.snapshot
+    : await decryptJson(envelope, passphrase);
+
+  $('#pass').value = '';
+  $('#lock').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+
+  const age = ageOf(SNAP.builtAt);
+  $('#tag').innerHTML =
+    `${SNAP.counts.owned} games owned · updated <span class="${age.stale ? 'stale' : ''}">${esc(age.label)}</span>`;
+  if (age.stale) {
+    showNotice(`Prices are from ${age.label}. Ownership and subscription info stays accurate; ` +
+               `a sale that started since then will not show.`);
+  }
+  $('#q').focus();
+}
+
 $('#unlockForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = $('#unlockForm button');
   const err = $('#unlockErr');
+  const pass = $('#pass').value;
   err.textContent = '';
   btn.disabled = true;
   btn.textContent = 'Unlocking…';
 
   try {
-    const envelope = await (await fetch('./snapshot.json', { cache: 'no-cache' })).json();
-    SNAP = envelope.format === 'gamevault-plain-snapshot'
-      ? envelope.snapshot
-      : await decryptJson(envelope, $('#pass').value);
-
-    $('#pass').value = '';
-    $('#lock').classList.add('hidden');
-    $('#app').classList.remove('hidden');
-
-    const age = ageOf(SNAP.builtAt);
-    $('#tag').innerHTML =
-      `${SNAP.counts.owned} games owned · updated <span class="${age.stale ? 'stale' : ''}">${esc(age.label)}</span>`;
-    if (age.stale) {
-      showNotice(`Prices are from ${age.label}. Ownership and subscription info stays accurate; ` +
-                 `a sale that started since then will not show.`);
+    await unlockWith(pass);
+    // Only persist AFTER a successful decrypt, so a typo is never stored.
+    if ($('#remember').checked) {
+      try { localStorage.setItem(REMEMBER_KEY, pass); } catch { /* private mode */ }
+    } else {
+      forget();
     }
-    $('#q').focus();
   } catch (e2) {
     err.textContent = e2.message;
+    forget();   // a stored passphrase that no longer works must not linger
   } finally {
     btn.disabled = false;
     btn.textContent = 'Unlock';
   }
 });
 
+// Auto-unlock when the user opted in. A stored passphrase that fails (because
+// the secret was rotated) silently falls back to the normal prompt.
+(async () => {
+  const saved = remembered();
+  if (!saved) return;
+  $('#remember').checked = true;
+  try {
+    await unlockWith(saved);
+  } catch {
+    forget();
+    $('#unlockErr').textContent = 'Saved passphrase no longer works — it may have been rotated.';
+  }
+})();
+
 $('#lockBtn').addEventListener('click', () => {
   SNAP = null;                      // drop the plaintext from memory
+  forget();                         // Lock means lock: don't auto-reopen
+  $('#remember').checked = false;
   $('#results').innerHTML = '';
+  $('#q').value = '';
   $('#app').classList.add('hidden');
   $('#lock').classList.remove('hidden');
 });

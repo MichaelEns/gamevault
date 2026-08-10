@@ -11,12 +11,12 @@
  */
 const VERSION = 'gv-v1';
 const SHELL = [
-  '/',
-  '/style.css',
-  '/app.js',
-  '/manifest.webmanifest',
-  '/icon-192.png',
-  '/icon-512.png',
+  './',
+  './style.css',
+  './app.js',
+  './manifest.webmanifest',
+  './icon-192.png',
+  './icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {

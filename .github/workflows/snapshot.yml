@@ -92,10 +92,14 @@ jobs:
           echo "Snapshot is encrypted."
 
       - name: Copy PWA assets
+        # NOTE: manifest.webmanifest and sw.js are NOT copied from public/.
+        # The site/ versions use RELATIVE paths because Pages serves from a
+        # subdirectory; the public/ versions use absolute paths because the
+        # local server serves from the root. Copying them over would
+        # reintroduce the 404-on-launch bug.
         run: |
           cp public/icon-180.png public/icon-192.png public/icon-512.png \
              public/icon-maskable.png public/style.css site/
-          cp public/manifest.webmanifest public/sw.js site/
           cp lib/snapshot-crypto.mjs site/
 
       - uses: actions/configure-pages@v5

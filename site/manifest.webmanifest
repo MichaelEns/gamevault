@@ -1,25 +1,22 @@
 {
-  "name": "GameVault — own it? good deal?",
+  "name": "GameVault - own it? good deal?",
   "short_name": "GameVault",
   "description": "Do I already own this game, is it in a subscription, and is this actually a good price?",
-  "start_url": "/",
-  "scope": "/",
+
+  "_comment": "Every path here is RELATIVE. GitHub Pages serves this from a subdirectory (/gamevault/), so an absolute start_url of '/' launches the installed app at the domain root and 404s. Relative URLs resolve against this manifest's own location, which is correct on Pages, on a custom domain, and locally.",
+
+  "start_url": "./",
+  "scope": "./",
+  "id": "./",
+
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#10131a",
   "theme_color": "#10131a",
   "categories": ["utilities", "shopping", "games"],
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ],
-  "shortcuts": [
-    {
-      "name": "Search a game",
-      "short_name": "Search",
-      "url": "/?focus=search",
-      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
-    }
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

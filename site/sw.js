@@ -1,22 +1,27 @@
 /**
- * GameVault service worker.
+ * GameVault service worker - static (GitHub Pages) build.
  *
- * Scope is deliberately narrow. Caching the app SHELL (html/css/js/icons)
- * makes the PWA open instantly and survive a dropped connection, which is
- * the point of installing it on a phone.
+ * All paths are RELATIVE. Pages serves this from a subdirectory, so an
+ * absolute '/style.css' would resolve to the domain root and 404 -- which
+ * is exactly what broke the first install.
  *
- * API responses are NEVER cached. Prices and ownership are exactly the data
- * you must not see a stale copy of -- a cached "on sale" or "you own this"
- * is worse than no answer at all.
+ * The app SHELL is cached so the PWA opens instantly and works offline.
+ * The SNAPSHOT is not: it is the data you actually want current, and a
+ * stale cached copy would silently show old prices. It is fetched
+ * network-first, falling back to cache only when genuinely offline.
  */
-const VERSION = 'gv-v1';
+const VERSION = 'gv-static-v2';
+
+// Relative to the SW's own scope, which on Pages is /gamevault/.
 const SHELL = [
-  '/',
-  '/style.css',
-  '/app.js',
-  '/manifest.webmanifest',
-  '/icon-192.png',
-  '/icon-512.png',
+  './',
+  './index.html',
+  './style.css',
+  './app-static.js',
+  './snapshot-crypto.mjs',
+  './manifest.webmanifest',
+  './icon-192.png',
+  './icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {
@@ -24,7 +29,7 @@ self.addEventListener('install', (event) => {
     caches.open(VERSION)
       .then((c) => c.addAll(SHELL))
       .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting()), // a failed precache must not block install
+      .catch(() => self.skipWaiting()),  // a failed precache must not block install
   );
 });
 
@@ -43,13 +48,26 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never serve API data from cache, and never store it.
-  if (url.pathname.startsWith('/api/')) return;
+  const isSnapshot = url.pathname.endsWith('/snapshot.json') ||
+                     url.pathname.endsWith('/snapshot-meta.json');
 
-  // Login page must always be live so a redirect is not masked by a cache hit.
-  if (url.pathname === '/login' || url.pathname === '/login.html') return;
+  if (isSnapshot) {
+    // Network-first: freshness matters more than speed for the data itself.
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            caches.open(VERSION).then((c) => c.put(request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(request)),   // offline: last known snapshot
+    );
+    return;
+  }
 
-  // Shell: cache-first, then refresh in the background.
+  // Shell: cache-first, refreshed in the background.
   event.respondWith(
     caches.match(request).then((hit) => {
       const network = fetch(request)
@@ -60,7 +78,7 @@ self.addEventListener('fetch', (event) => {
           }
           return res;
         })
-        .catch(() => hit); // offline: fall back to whatever we have
+        .catch(() => hit);
       return hit || network;
     }),
   );

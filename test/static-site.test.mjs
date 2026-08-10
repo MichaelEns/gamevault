@@ -83,7 +83,52 @@ try {
   const html = await (await fetch(`${BASE}/`)).text();
   const absolute = [...html.matchAll(/(?:href|src)="(\/[^"]*)"/g)].map((m) => m[1]);
   ok(absolute.length === 0,
-     absolute.length ? `absolute paths would 404 on Pages: ${absolute.join(', ')}` : 'all asset paths are relative');
+     absolute.length ? `absolute paths would 404 on Pages: ${absolute.join(', ')}` : 'index.html asset paths are relative');
+
+  // The manifest is what the INSTALLED app obeys. An absolute start_url here
+  // does not break the browser tab at all -- it only breaks the home-screen
+  // icon, which is why it shipped unnoticed. Check it explicitly.
+  const manifest = await (await fetch(`${BASE}/manifest.webmanifest`)).json();
+  for (const field of ['start_url', 'scope', 'id']) {
+    ok(!String(manifest[field] ?? '').startsWith('/'),
+       `manifest ${field} is relative (${manifest[field]})`);
+  }
+  const absIcons = (manifest.icons ?? []).map((i) => i.src).filter((s) => s.startsWith('/'));
+  ok(absIcons.length === 0,
+     absIcons.length ? `absolute icon paths: ${absIcons.join(', ')}` : 'manifest icon paths are relative');
+
+  // The service worker precache is the other absolute-path trap: addAll()
+  // rejects atomically, so ONE bad entry silently kills the whole install.
+  // Parse the precache ARRAY specifically -- scanning every quoted string
+  // would also flag comments and endsWith('/snapshot.json') suffix checks.
+  const swSrc = await (await fetch(`${BASE}/sw.js`)).text();
+  const shellMatch = swSrc.match(/const\s+SHELL\s*=\s*\[([\s\S]*?)\]/);
+  ok(!!shellMatch, 'sw.js declares a SHELL precache list');
+  const precache = [...(shellMatch?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  ok(precache.length > 0, `SHELL lists ${precache.length} entries`);
+
+  const absPrecache = precache.filter((p) => p.startsWith('/'));
+  ok(absPrecache.length === 0,
+     absPrecache.length ? `sw.js precaches absolute paths: ${absPrecache.join(', ')}` : 'sw.js precache paths are relative');
+
+  console.log('\nEvery service-worker precache entry actually exists');
+  // addAll() is all-or-nothing: a single 404 (the old '/app.js', which this
+  // site never had) makes the whole precache -- and the install -- fail.
+  for (const entry of precache) {
+    const r = await fetch(BASE + '/' + entry.replace(/^\.?\//, ''));
+    ok(r.ok, `precache ${entry} -> ${r.status}`);
+  }
+
+  console.log('\nInstalled-app launch from a Pages subpath resolves to the real app');
+  // Reproduce the actual 404: resolve start_url the way a browser does,
+  // against the manifest URL, on a site served from /gamevault/.
+  const pagesManifest = new URL('https://michaelens.github.io/gamevault/manifest.webmanifest');
+  const launch = new URL(manifest.start_url, pagesManifest);
+  ok(launch.href.startsWith('https://michaelens.github.io/gamevault/'),
+     `start_url launches inside the site (${launch.href})`);
+  const swScope = new URL(manifest.scope, pagesManifest);
+  ok(swScope.href.startsWith('https://michaelens.github.io/gamevault/'),
+     `scope stays inside the site (${swScope.href})`);
 } finally {
   server.close();
 }

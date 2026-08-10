@@ -40,6 +40,10 @@
     <form id="unlockForm">
       <input id="pass" type="password" placeholder="Passphrase"
              autocomplete="current-password" autocapitalize="off" autocorrect="off">
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--dim)">
+        <input id="remember" type="checkbox" style="width:auto;margin:0">
+        Remember on this device
+      </label>
       <button type="submit">Unlock</button>
     </form>
     <div class="err" id="unlockErr"></div>
