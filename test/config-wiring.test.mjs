@@ -87,7 +87,8 @@ for (const variable of ['SUBSCRIPTIONS', 'COUNTRY', 'SNAPSHOT_PRICE_LIMIT']) {
 console.log('\nThe app offers every secret the build can actually use');
 const app = await readFile(path.join(PATHS.root, 'site', 'app-static.js'), 'utf8');
 for (const name of ['ITAD_API_KEY', 'STEAM_API_KEY', 'STEAM_ID', 'ITCH_API_KEY',
-                    'LEGENDARY_CONFIG', 'NILE_CONFIG', 'UBISOFT_EMAIL', 'UBISOFT_PASSWORD']) {
+                    'LEGENDARY_CONFIG', 'NILE_CONFIG', 'UBISOFT_EMAIL', 'UBISOFT_PASSWORD',
+                    'UBISOFT_REMEMBER_TICKET']) {
   ok(app.includes(name), `"Add key" offers ${name}`);
 }
 

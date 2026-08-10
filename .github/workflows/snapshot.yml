@@ -89,8 +89,11 @@ jobs:
           STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
           STEAM_ID: ${{ secrets.STEAM_ID }}
           ITCH_API_KEY: ${{ secrets.ITCH_API_KEY }}
-          # Ubisoft Connect. Its own login, so email + password rather than a
-          # key; fails if the account has 2FA enabled.
+          # Ubisoft Connect. Preferred is UBISOFT_REMEMBER_TICKET, obtained once
+          # with tools/ubisoft-auth.mjs: it clears 2FA (which a password alone
+          # cannot), grants only session creation, and is revocable on its own.
+          # Email + password remain as a fallback for accounts without 2FA.
+          UBISOFT_REMEMBER_TICKET: ${{ secrets.UBISOFT_REMEMBER_TICKET }}
           UBISOFT_EMAIL: ${{ secrets.UBISOFT_EMAIL }}
           UBISOFT_PASSWORD: ${{ secrets.UBISOFT_PASSWORD }}
           # Which Game Pass tier you actually pay for. Getting this wrong

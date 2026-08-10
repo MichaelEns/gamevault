@@ -260,14 +260,21 @@ console.log('\nUbisoft now uses the API app id, not the blocked client id');
 // 403 errorCode 1002 even for deliberately fake credentials. The app id used
 // for API requests is accepted and answers 401 "Invalid credentials" instead,
 // so Ubisoft is a normal, configurable source again rather than a dead one.
-globalThis.__setLive(new Map([['UBISOFT_EMAIL', AFTER], ['UBISOFT_PASSWORD', AFTER]]));
+globalThis.__setLive(new Map([['UBISOFT_REMEMBER_TICKET', AFTER]]));
 globalThis.__renderSetup();
 html = nodes.get('setup').innerHTML;
 const ubiCard = cardFor(html, 'Ubisoft Connect');
 ok(ubiCard.includes('rebuild pending'),
-   'credentials newer than the build read as pending');
+   'a ticket newer than the build reads as pending');
 ok(!ubiCard.includes('unavailable'),
    'and Ubisoft is no longer flagged as permanently unavailable');
+
+// The hint and the pending note are mutually exclusive, so check the hint in
+// the state where it is actually rendered.
+globalThis.__setLive(null);
+globalThis.__renderSetup();
+ok(/ubisoft-auth\.mjs/.test(cardFor(nodes.get('setup').innerHTML, 'Ubisoft Connect')),
+   'and when unconfigured it names the 2FA route rather than declaring it impossible');
 
 // The "unavailable" mechanism itself must still work, since a source can
 // genuinely die upstream again. Exercise it directly rather than deleting it.

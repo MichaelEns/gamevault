@@ -68,12 +68,12 @@ const SOURCES = [
   },
   {
     key: 'ubisoft', label: 'Ubisoft Connect', unlocks: 'Your Ubisoft library',
-    needs: ['UBISOFT_EMAIL', 'UBISOFT_PASSWORD'],
+    needs: ['UBISOFT_REMEMBER_TICKET'],
     get: null,
-    hint: 'Uses your account login rather than a key. Ubisoft blocks the ' +
-          'Connect client\u2019s own app ID for third parties, so this uses the ' +
-          'API app ID instead. 2FA still cannot be automated \u2014 if the account ' +
-          'has it enabled, there is no non-interactive path.',
+    hint: 'Ubisoft blocks the Connect client\u2019s app ID for third parties, so ' +
+          'this uses the API app ID. If your account has 2FA, a password alone ' +
+          'cannot clear it \u2014 run "node tools/ubisoft-auth.mjs" once on a PC to ' +
+          'get a reusable ticket, then delete UBISOFT_PASSWORD.',
   },
   {
     key: 'nintendo', label: 'Nintendo', unlocks: 'eShop prices (ownership is manual)',
@@ -404,8 +404,9 @@ function renderConnect(state = {}) {
         <option value="STEAM_API_KEY">STEAM_API_KEY &mdash; Steam ownership</option>
         <option value="STEAM_ID">STEAM_ID &mdash; your profile URL is fine</option>
         <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
+        <option value="UBISOFT_REMEMBER_TICKET">UBISOFT_REMEMBER_TICKET &mdash; Ubisoft (clears 2FA)</option>
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
-        <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; fails if 2FA is on</option>
+        <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; no 2FA accounts only</option>
         <option value="LEGENDARY_CONFIG">LEGENDARY_CONFIG &mdash; Epic (base64)</option>
         <option value="NILE_CONFIG">NILE_CONFIG &mdash; Prime Gaming (base64)</option>
       </select>
