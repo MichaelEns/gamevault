@@ -26,6 +26,9 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # For the claim-failure notification: an issue opened by the Actions bot is
+  # what emails the repository owner, and needs no SMTP credentials.
+  issues: write
 
 # Never let two builds publish at once.
 concurrency:
@@ -41,6 +44,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Install dependencies
+        # There was no install step at all, which went unnoticed for a long
+        # time because everything the build did used only Node built-ins. The
+        # moment real dependencies appeared - tweetnacl and blakejs, for
+        # sealing the rotated credentials - they were simply absent, and the
+        # write-back failed with "Cannot find package 'blakejs'" while the rest
+        # of the build carried on looking healthy.
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Verify the crypto dependencies are actually present
+        # Sealing a secret is the one step that silently costs something when
+        # it fails: rotating credentials stop being refreshed and every
+        # provider that uses one dies a build later, for reasons that point
+        # nowhere near this.
+        run: |
+          node -e "
+            Promise.all([import('tweetnacl'), import('blakejs')])
+              .then(() => console.log('tweetnacl and blakejs are available.'))
+              .catch((e) => { console.error('::error::' + e.message); process.exit(1); });
+          "
 
       # Optional: Epic and Amazon ownership.
       # These CLIs cannot do a browser login in CI, so their tokens are
@@ -119,6 +143,13 @@ jobs:
           # Humble. Worth having even though most keys are Steam keys: an
           # UNREDEEMED key is a game you own that appears in no library at all.
           HUMBLE_SESSION: ${{ secrets.HUMBLE_SESSION }}
+          # Epic session cookies, for claiming the weekly free games. Only the
+          # payment host is involved and it is auth-gated rather than
+          # bot-protected, so no browser impersonation is needed.
+          EPIC_COOKIES: ${{ secrets.EPIC_COOKIES }}
+          # Used to fetch the previous snapshot, so the claim log survives
+          # between builds and last week's claims can be verified.
+          SITE_URL: ${{ vars.SITE_URL }}
           MANUAL_LIBRARY: ${{ secrets.MANUAL_LIBRARY }}
           # Ubisoft Connect. Preferred is UBISOFT_REMEMBER_TICKET, obtained once
           # with tools/ubisoft-auth.mjs: it clears 2FA (which a password alone
@@ -170,6 +201,46 @@ jobs:
           fi
           grep -n 'const BUILD' site/sw.js
           echo "Service worker stamped as ${BUILD_ID}."
+
+      - name: Report claim failures
+        # The email half of "tell me when it breaks". An issue opened by the
+        # Actions bot notifies the repository owner by email, which needs no
+        # SMTP credentials and no third-party service.
+        #
+        # Rate-limited to one open issue: reopening or re-notifying every six
+        # hours would train the user to ignore it, which defeats the purpose.
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FAILURES=$(node -e "
+            const fs=require('fs');
+            try{
+              const m=JSON.parse(fs.readFileSync('site/snapshot-meta.json','utf8'));
+              process.stdout.write(String(m.claimFailures||0));
+            }catch{process.stdout.write('0')}
+          ")
+          [ "$FAILURES" = "0" ] && { echo "No claim failures."; exit 0; }
+
+          EXISTING=$(gh issue list --state open --label claim-failure --json number --jq 'length')
+          if [ "$EXISTING" != "0" ]; then
+            echo "A claim-failure issue is already open; not opening another."
+            exit 0
+          fi
+
+          gh label create claim-failure --color d73a4a \
+            --description "An automatic game claim did not arrive" 2>/dev/null || true
+          gh issue create \
+            --title "GameVault: $FAILURES automatic claim(s) did not arrive" \
+            --label claim-failure \
+            --body "The scheduled build claimed one or more free games, but they did not appear in your library on a later sync.
+
+          A claim that Epic accepts can still fail to deliver, so success is judged by the game turning up in the library rather than by the HTTP response.
+
+          Open the app to see which ones and claim them by hand:
+          https://michaelens.github.io/gamevault/
+
+          This issue will not be reopened while it stays open, so the six-hourly build will not keep mailing you. Close it once the games are claimed."
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -377,11 +377,27 @@ function timeLeftLabel(endsAt) {
 function renderFreebies() {
   const box = $('#freebies');
   if (!box) return;
+
+  // Failures first and in red: the entire justification for automating claims
+  // is that a failure gets noticed. A quiet automation that has stopped
+  // working is worse than no automation, because it replaces a chore you
+  // would notice with a confidence you would not.
+  const failures = (SNAP?.claimFailures ?? []).filter((f) => f.failedAt || f.error);
+  const failHtml = failures.length ? `
+    <div class="claim-fail">
+      <strong>${failures.length} automatic claim${failures.length > 1 ? 's' : ''} did not work</strong>
+      <ul class="free-list">${failures.map((f) => `<li>
+        ${esc(f.title)}
+        <span class="free-note">${esc(f.reason ?? f.error ?? 'did not arrive')}</span>
+        ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">claim it yourself</a>` : ''}
+      </li>`).join('')}</ul>
+    </div>` : '';
+
   const all = SNAP?.freebies ?? [];
   // Nothing actionable about a game already in your Epic library.
   const worth = all.filter((f) => !f.ownedHere && timeLeftLabel(f.endsAt) !== 'ended');
 
-  if (!worth.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  if (!worth.length && !failures.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
 
   const rows = worth.map((f) => {
     const elsewhere = (f.ownedElsewhere ?? []).length
@@ -394,10 +410,14 @@ function renderFreebies() {
     </li>`;
   }).join('');
 
-  box.innerHTML = `
+  const freeHtml = worth.length ? `
     <h2 class="free-title">Free to keep &mdash; ${worth.length} you don&rsquo;t have</h2>
     <ul class="free-list">${rows}</ul>
-    <p class="free-foot">Claim once and it is yours permanently.</p>`;
+    <p class="free-foot">${SNAP?.claimLog?.length
+      ? 'Claimed automatically, then confirmed against your library on the next sync.'
+      : 'Claim once and it is yours permanently.'}</p>` : '';
+
+  box.innerHTML = failHtml + freeHtml;
   box.classList.remove('hidden');
 }
 
@@ -530,6 +550,7 @@ function renderConnect(state = {}) {
         <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
         <option value="EA_REMID">EA_REMID &mdash; EA / Origin library</option>
         <option value="HUMBLE_SESSION">HUMBLE_SESSION &mdash; Humble (unredeemed keys)</option>
+        <option value="EPIC_COOKIES">EPIC_COOKIES &mdash; auto-claim Epic free games</option>
         <option value="MANUAL_LIBRARY">MANUAL_LIBRARY &mdash; Nintendo etc. (JSON)</option>
         <option value="UBISOFT_REMEMBER_TICKET">UBISOFT_REMEMBER_TICKET &mdash; Ubisoft (clears 2FA)</option>
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>

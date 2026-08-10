@@ -219,6 +219,55 @@ async function main() {
     log(`${keys.worthRedeeming.length} worth redeeming, ${keys.keepGiftable.length} worth keeping giftable`);
   }
 
+  // ---- 4d. Claim free games, and check the last lot arrived ---------------
+  // Order matters: verify BEFORE claiming, so a claim made minutes ago is not
+  // immediately judged against a library that predates it.
+  const claimsMod = await import('../lib/claims.mjs');
+  const siteUrl = ENV.SITE_URL || (ENV.GITHUB_REPOSITORY
+    ? `https://${ENV.GITHUB_REPOSITORY.split('/')[0].toLowerCase()}.github.io/${ENV.GITHUB_REPOSITORY.split('/')[1]}`
+    : null);
+  const previousLog = await claimsMod.loadPreviousClaims(siteUrl, ENV.SNAPSHOT_PASSPHRASE);
+  const outcome = claimsMod.verifyClaims(previousLog, library.index ?? {});
+
+  if (previousLog.length) {
+    console.log('');
+    console.log('4d. Verifying previous claims');
+    for (const v of outcome.verified) log(`${v.title} - arrived, confirmed owned`);
+    for (const p of outcome.pending) log(`${p.title} - claimed, not yet visible (still within grace)`);
+    for (const f of outcome.failed) log(`${f.title} - DID NOT ARRIVE: ${f.reason}`);
+  }
+
+  let attempts = [];
+  const epicClaim = await import('../lib/epic-claim.mjs');
+  if (epicClaim.configured(ENV) && freebies.some((f) => f.worthClaiming)) {
+    console.log('');
+    console.log('4e. Claiming free games');
+    // Never re-attempt something already being tracked, or a failed claim
+    // would be retried on every single build.
+    const tracked = new Set(previousLog.filter((e) => !e.giveUp).map((e) => e.norm));
+    const todo = freebies.filter((f) => f.worthClaiming && !tracked.has(f.norm));
+    if (!todo.length) log('nothing new to claim');
+
+    const results = await epicClaim.claimAll(ENV, todo).catch((e) => {
+      log(`claiming failed: ${e.message}`);
+      return [];
+    });
+    for (const r of results) {
+      log(`${r.game.title} - ${r.note}`);
+      // An already-owned game is not a failure and must not be recorded as
+      // one; it also does not need verifying.
+      if (!r.alreadyOwned) {
+        attempts.push(claimsMod.recordAttempt(r.game, { ok: r.ok, error: r.ok ? null : r.note }));
+      }
+    }
+  } else if (freebies.some((f) => f.worthClaiming)) {
+    console.log('');
+    log('free games available but EPIC_COOKIES is not set, so nothing was claimed');
+  }
+
+  const claimLog = claimsMod.nextLog({ pending: outcome.pending, failed: outcome.failed, attempts });
+  const claimFailures = claimsMod.reportable(claimLog);
+
   // ---- 5. Assemble -------------------------------------------------------
   // Some providers hand out rotating credentials: EA replaces its remid
   // cookie, Ubisoft issues a new remember-me ticket, and in both cases the old
@@ -282,6 +331,8 @@ async function main() {
     providers,
     freebies,
     keys,
+    claimLog,
+    claimFailures,
     // The index maps normalised title -> where you own it.
     index: library.index ?? {},
     subs,
@@ -318,6 +369,9 @@ async function main() {
     builtAt: snapshot.builtAt,
     encrypted: Boolean(passphrase),
     counts: snapshot.counts,
+    // A count only - the titles are ownership data and belong inside the
+    // encrypted payload, but the workflow needs to know whether to notify.
+    claimFailures: (snapshot.claimFailures ?? []).length,
   }), 'utf8');
 
   const kb = (JSON.stringify(payload).length / 1024).toFixed(1);
