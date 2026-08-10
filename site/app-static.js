@@ -70,17 +70,10 @@ const SOURCES = [
     key: 'ubisoft', label: 'Ubisoft Connect', unlocks: 'Your Ubisoft library',
     needs: ['UBISOFT_EMAIL', 'UBISOFT_PASSWORD'],
     get: null,
-    // Verified directly, with deliberately fake credentials, and the response
-    // is identical: HTTP 403, errorCode 1002, "The Service: authentication, is
-    // not currently available for Application ...". Ubisoft has disabled
-    // authentication for this application ID at the gateway, so no password is
-    // going to help.
-    unavailable:
-      'Ubisoft has disabled logins for this client ID (HTTP 403, errorCode 1002). ' +
-      'Fake credentials get the identical response, so this is not about your ' +
-      'account, password or 2FA. Nothing can be retrieved until Ubisoft re-enables ' +
-      'it \u2014 you should delete UBISOFT_EMAIL and UBISOFT_PASSWORD rather than ' +
-      'leave an account password stored for a source that cannot work.',
+    hint: 'Uses your account login rather than a key. Ubisoft blocks the ' +
+          'Connect client\u2019s own app ID for third parties, so this uses the ' +
+          'API app ID instead. 2FA still cannot be automated \u2014 if the account ' +
+          'has it enabled, there is no non-interactive path.',
   },
   {
     key: 'nintendo', label: 'Nintendo', unlocks: 'eShop prices (ownership is manual)',

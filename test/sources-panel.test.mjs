@@ -81,7 +81,9 @@ const hooked = src.replace(
   /^\$\('#setupBtn'\)\.addEventListener[\s\S]*$/m,
   'globalThis.__renderSetup = renderSetup;\n' +
   'globalThis.__setSnap = (s) => { SNAP = s; };\n' +
-  'globalThis.__setLive = (m) => { LIVE_SECRETS = m; };\n',
+  'globalThis.__setLive = (m) => { LIVE_SECRETS = m; };\n' +
+  'globalThis.__pushSource = (s) => { SOURCES.push(s); };\n' +
+  'globalThis.__popSource = () => { SOURCES.pop(); };\n',
 );
 // Written beside the original so its relative import of ./snapshot-crypto.mjs
 // still resolves; a data: URL cannot resolve relative specifiers.
@@ -236,21 +238,43 @@ html = nodes.get('setup').innerHTML;
 ok(cardFor(html, 'Prices &').includes('saved, but no data'),
    'zero priced titles with an older key is still flagged');
 
-console.log('\nA source known to be broken upstream says so plainly');
-// Ubisoft returns 403 errorCode 1002 for this client ID even with fake
-// credentials, so presenting it as a configuration problem would send the
-// user chasing their own password.
+// Exercises the "unavailable" rendering path without depending on any real
+// source being dead. Sources do die upstream, so the mechanism has to keep
+// working even when nothing is currently using it.
+function SOURCES_FOR_TEST_UNAVAILABLE() {
+  const marker = 'A Dead Storefront';
+  globalThis.__pushSource({
+    key: '__test_dead', label: marker, unlocks: 'nothing',
+    needs: ['DEAD_KEY'], get: null,
+    unavailable: 'This storefront shut down its API.',
+  });
+  globalThis.__setLive(new Map([['DEAD_KEY', AFTER]]));
+  globalThis.__renderSetup();
+  const out = cardFor(nodes.get('setup').innerHTML, marker);
+  globalThis.__popSource();
+  return out;
+}
+
+console.log('\nUbisoft now uses the API app id, not the blocked client id');
+// Ubisoft blocks the Connect PC client's own app id at the gateway: it returns
+// 403 errorCode 1002 even for deliberately fake credentials. The app id used
+// for API requests is accepted and answers 401 "Invalid credentials" instead,
+// so Ubisoft is a normal, configurable source again rather than a dead one.
 globalThis.__setLive(new Map([['UBISOFT_EMAIL', AFTER], ['UBISOFT_PASSWORD', AFTER]]));
 globalThis.__renderSetup();
 html = nodes.get('setup').innerHTML;
 const ubiCard = cardFor(html, 'Ubisoft Connect');
-ok(ubiCard.includes('unavailable'), 'Ubisoft is labelled unavailable');
-ok(!ubiCard.includes('rebuild pending'),
-   'and is never described as pending, which would imply waiting would help');
-ok(/not about your account, password or 2FA/.test(ubiCard),
-   'and the note rules out the causes the user would otherwise suspect');
-ok(/delete UBISOFT_EMAIL/.test(ubiCard),
-   'and advises removing the stored password');
+ok(ubiCard.includes('rebuild pending'),
+   'credentials newer than the build read as pending');
+ok(!ubiCard.includes('unavailable'),
+   'and Ubisoft is no longer flagged as permanently unavailable');
+
+// The "unavailable" mechanism itself must still work, since a source can
+// genuinely die upstream again. Exercise it directly rather than deleting it.
+const dead = SOURCES_FOR_TEST_UNAVAILABLE();
+ok(dead.includes('unavailable'), 'a source marked unavailable still renders as such');
+ok(!dead.includes('rebuild pending'),
+   'and is never called pending, which would imply waiting helps');
 
 console.log('\nMarkup is escaped (store errors are attacker-adjacent text)');globalThis.__setSnap({
   builtAt: new Date().toISOString(),
