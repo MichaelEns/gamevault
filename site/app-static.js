@@ -418,6 +418,7 @@ function renderConnect(state = {}) {
         <option value="STEAM_ID">STEAM_ID &mdash; your profile URL is fine</option>
         <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
         <option value="EA_REMID">EA_REMID &mdash; EA / Origin library</option>
+        <option value="MANUAL_LIBRARY">MANUAL_LIBRARY &mdash; Nintendo etc. (JSON)</option>
         <option value="UBISOFT_REMEMBER_TICKET">UBISOFT_REMEMBER_TICKET &mdash; Ubisoft (clears 2FA)</option>
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
         <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; no 2FA accounts only</option>
