@@ -119,12 +119,20 @@ try {
 
   console.log('\nAdd this as the EA_REMID secret:\n');
   console.log(cookies.remid);
-  emit(cookies.remid);
 
   if (cookies.sid) {
-    console.log('\nAnd add this as the EA_SID secret:\n');
+    console.log('\nAnd this as the EA_SID secret:\n');
     console.log(cookies.sid);
   }
+
+  // Both are emitted, not just remid. Sending remid alone is what failed
+  // repeatedly: it is a remember-me credential, and sid is the session it
+  // mints. Storing only half of a pair that worked together would reproduce
+  // the original failure in CI while appearing to have succeeded here.
+  emit(cookies.sid
+    ? { EA_REMID: cookies.remid, EA_SID: cookies.sid }
+    : cookies.remid);
+
   console.log('\nIf EA ownership stops updating later, run this again.');
 } catch (e) {
   console.error('\nFailed: ' + e.message);

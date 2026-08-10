@@ -163,6 +163,7 @@ Good "GitHub access to $Repo confirmed"
 
 # --- what is already done? -------------------------------------------------
 Head 'Checking what is already configured'
+Get-BrokenProviders
 
 $existing = @{}
 try {
@@ -171,15 +172,59 @@ try {
 
 function Have($name) { return $existing.ContainsKey($name) }
 
+<#
+.SYNOPSIS
+  Which providers actually produced data in the most recent build.
+.DESCRIPTION
+  A secret existing is not the same as a secret working, and treating them as
+  equivalent is what let a broken Ubisoft ticket sit behind "Already
+  configured - skipping" indefinitely. The build log is the only place that
+  records whether a credential actually did anything.
+#>
+$script:BrokenProviders = @{}
+function Get-BrokenProviders {
+    $runId = $null
+    $out = $null
+    if (Invoke-Native 'gh' @('run', 'list', '--repo', $Repo, '--workflow', 'snapshot.yml',
+                             '--limit', '1', '--json', 'databaseId',
+                             '--jq', '.[0].databaseId') -Output ([ref]$out)) {
+        $runId = ($out | Select-Object -Last 1)
+    }
+    if (-not $runId) { return }
+    $log = $null
+    if (-not (Invoke-Native 'gh' @('run', 'view', "$runId", '--repo', $Repo, '--log') -Output ([ref]$log))) { return }
+    foreach ($line in $log) {
+        $m = [regex]::Match([string]$line, '^\s*(\w+)\s+FAILED:\s*(.+)$')
+        if ($m.Success) {
+            $script:BrokenProviders[$m.Groups[1].Value.ToLower()] = $m.Groups[2].Value.Trim()
+        }
+    }
+}
+
+# True when the credential exists AND the last build got data from it.
+function Working($secretName, $provider) {
+    if (-not (Have $secretName)) { return $false }
+    return -not $script:BrokenProviders.ContainsKey($provider.ToLower())
+}
+
 foreach ($s in @('STEAM_API_KEY', 'STEAM_ID', 'ITAD_API_KEY', 'ITCH_API_KEY',
                  'LEGENDARY_CONFIG', 'NILE_CONFIG', 'UBISOFT_REMEMBER_TICKET',
                  'EA_REMID', 'HUMBLE_SESSION', 'MANUAL_LIBRARY')) {
-    if (Have $s) { Good "$s is set" } else { Info "$s is not set" }
+    if (-not (Have $s)) { Info "$s is not set"; continue }
+    $prov = @{ 'LEGENDARY_CONFIG'='epic'; 'NILE_CONFIG'='amazon'; 'UBISOFT_REMEMBER_TICKET'='ubisoft';
+                'EA_REMID'='ea'; 'HUMBLE_SESSION'='humble'; 'STEAM_API_KEY'='steam'; 'ITCH_API_KEY'='itch' }[$s]
+    if ($prov -and $script:BrokenProviders.ContainsKey($prov)) {
+        Warn "$s is set but the last build FAILED: $($script:BrokenProviders[$prov])"
+    } else { Good "$s is set" }
 }
 
 function Set-Secret {
     param([string] $Name, [string] $Value)
     if (-not $Value) { Warn "$Name - nothing to save"; return $false }
+    # Trailing whitespace in a secret is not cosmetic. A credential used as an
+    # HTTP header with a stray CR makes undici reject the request before it is
+    # sent, which surfaced once as an unexplained "fetch failed".
+    $Value = $Value.Trim()
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -188,6 +233,18 @@ function Set-Secret {
         Bad "$Name could not be saved (gh exit $LASTEXITCODE)"
         return $false
     } finally { $ErrorActionPreference = $prev }
+}
+
+# Saves whatever an auth tool returned: one value, or several named ones.
+function Save-AuthResult {
+    param($Result, [string] $DefaultName)
+    if (-not $Result) { return $false }
+    if ($Result -is [string]) { return (Set-Secret $DefaultName $Result) }
+    $allOk = $true
+    foreach ($p in $Result.PSObject.Properties) {
+        if (-not (Set-Secret $p.Name ([string]$p.Value))) { $allOk = $false }
+    }
+    return $allOk
 }
 
 # Store clients write their token to different places depending on version and
@@ -287,7 +344,7 @@ try {
 if (& $want 'epic') {
     Head 'Epic Games'
     Step 'Epic' {
-        if ((Have 'LEGENDARY_CONFIG') -and -not $Only) {
+        if ((Working 'LEGENDARY_CONFIG' 'epic') -and -not $Only) {
             Info 'Already configured - skipping. Use -Only epic to redo it.'
             Record 'Epic' 'skipped' 'already configured'
             return
@@ -325,7 +382,7 @@ if (& $want 'epic') {
 if (& $want 'amazon') {
     Head 'Amazon Prime Gaming'
     Step 'Prime Gaming' {
-        if ((Have 'NILE_CONFIG') -and -not $Only) {
+        if ((Working 'NILE_CONFIG' 'amazon') -and -not $Only) {
             Info 'Already configured - skipping. Use -Only amazon to redo it.'
             Record 'Prime Gaming' 'skipped' 'already configured'
             return
@@ -412,7 +469,17 @@ function Invoke-AuthTool {
             return $null
         }
         $value = (Get-Content $outFile -Raw).Trim()
-        if (-not $value -or $value.Length -lt 20) {
+        if (-not $value) {
+            Warn "The sign-in produced no $SecretName."
+            return $null
+        }
+        # A tool may return several secrets as a JSON object (EA needs both
+        # remid and sid; storing one without the other reproduces the very
+        # failure the pair was meant to fix).
+        if ($value.StartsWith('{')) {
+            try { return ($value | ConvertFrom-Json) } catch { /* fall through */ }
+        }
+        if ($value.Length -lt 20) {
             Warn "The $SecretName looked wrong (too short), so it was not saved."
             return $null
         }
@@ -427,7 +494,7 @@ function Invoke-AuthTool {
 if (& $want 'ubisoft') {
     Head 'Ubisoft Connect'
     Step 'Ubisoft' {
-        if ((Have 'UBISOFT_REMEMBER_TICKET') -and -not $Only) {
+        if ((Working 'UBISOFT_REMEMBER_TICKET' 'ubisoft') -and -not $Only) {
             Info 'Already configured - skipping. Use -Only ubisoft to redo it.'
             Record 'Ubisoft' 'skipped' 'already configured'
             return
@@ -455,7 +522,7 @@ if (& $want 'ubisoft') {
 if (& $want 'ea') {
     Head 'EA (formerly Origin)'
     Step 'EA' {
-        if ((Have 'EA_REMID') -and -not $Only) {
+        if ((Working 'EA_REMID' 'ea') -and -not $Only) {
             Info 'Already configured - skipping. Use -Only ea to redo it.'
             Record 'EA' 'skipped' 'already configured'
             return
@@ -465,7 +532,7 @@ if (& $want 'ea') {
 
         $remid = Invoke-AuthTool 'tools/ea-auth.mjs' 'cookie'
         if (-not $remid) { Record 'EA' 'failed' 'no cookie'; return }
-        if (Set-Secret 'EA_REMID' $remid) { Record 'EA' 'done' } else { Record 'EA' 'failed' 'secret not saved' }
+        if (Save-AuthResult $remid 'EA_REMID') { Record 'EA' 'done' } else { Record 'EA' 'failed' 'secret not saved' }
     }
 }
 
@@ -473,7 +540,7 @@ if (& $want 'ea') {
 if (& $want 'humble') {
     Head 'Humble Bundle'
     Step 'Humble' {
-        if ((Have 'HUMBLE_SESSION') -and -not $Only) {
+        if ((Working 'HUMBLE_SESSION' 'humble') -and -not $Only) {
             Info 'Already configured - skipping. Use -Only humble to redo it.'
             Record 'Humble' 'skipped' 'already configured'
             return
