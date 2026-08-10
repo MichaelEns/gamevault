@@ -16,6 +16,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
 
 let SNAP = null;
 
+// Live GitHub secret state, used to tell "never set" from "set since this build".
+let LIVE_SECRETS = null;
+
 const REPO = 'MichaelEns/gamevault';
 const SECRETS_URL = `https://github.com/${REPO}/settings/secrets/actions`;
 const VARS_URL = `https://github.com/${REPO}/settings/variables/actions`;
@@ -222,18 +225,39 @@ function renderSetup() {
   const box = $('#setup');
   const prov = SNAP?.providers ?? {};
   const stores = SNAP?.stores ?? {};
+  // Secret name -> when it was last set, fetched live from GitHub when a token
+  // is connected. Without this the panel cannot tell "you never set this" from
+  // "you set it two minutes ago and the snapshot predates it" -- and it
+  // reported both as "not connected", which is simply wrong.
+  const live = LIVE_SECRETS;
+  const builtAt = SNAP?.builtAt ? Date.parse(SNAP.builtAt) : 0;
 
   const rows = SOURCES.map((s) => {
     const p = prov[s.key] ?? {};
     const st = stores[s.key];
     // "Configured" comes from the builder; the store record proves it worked.
-    const live = st && st.ok !== false && (st.count ?? 0) > 0;
-    const state = live ? 'ok' : (p.configured ? 'warn' : 'off');
-    const badge = live ? `${st.count} titles`
+    const working = st && st.ok !== false && (st.count ?? 0) > 0;
+
+    // A secret set after this snapshot was built cannot possibly be reflected
+    // in it, however the build went.
+    const pending = !working && s.needs.length > 0 && live
+      && s.needs.every((n) => live.has(n))
+      && s.needs.some((n) => Date.parse(live.get(n)) > builtAt);
+    // Present in GitHub, older than the snapshot, and still not working: the
+    // build genuinely failed or found nothing, so keep showing why.
+    const savedButFailing = !working && !pending && s.needs.length > 0 && live
+      && s.needs.every((n) => live.has(n));
+
+    const state = working ? 'ok' : (pending || savedButFailing || p.configured ? 'warn' : 'off');
+    const badge = working ? `${st.count} titles`
+                : pending ? 'saved \u2014 rebuild pending'
+                : savedButFailing ? 'saved, but no data'
                 : p.configured ? 'configured, nothing synced'
                 : 'not connected';
-    const note = st?.error ? `Last sync failed: ${st.error}`
-               : (p.note && p.note !== 'ready' ? p.note : s.hint ?? '');
+    const note = pending
+      ? 'This key was added after the current snapshot was built. It will be used by the next rebuild.'
+      : st?.error ? `Last sync failed: ${st.error}`
+      : (p.note && p.note !== 'ready' ? p.note : s.hint ?? '');
 
     const links = [];
     if (s.get) links.push(`<a href="${s.get}" target="_blank" rel="noopener">Get key</a>`);
@@ -260,6 +284,13 @@ function renderSetup() {
 
   box.innerHTML = `
     <h2 class="setup-title">Where your data comes from</h2>
+    <p class="setup-intro">
+      This reflects the snapshot built
+      <strong>${esc(SNAP?.builtAt ? ageOf(SNAP.builtAt).label : 'unknown')}</strong>,
+      not GitHub&rsquo;s current settings. A key added after that build shows up
+      here only once the next rebuild finishes &mdash; saving it is not the same
+      as it having been used.
+    </p>
     <p class="setup-intro">
       Keys go to the GitHub Action that builds your snapshot, not to this page.
       Steam, GOG and IsThereAnyDeal all refuse cross-origin browser requests,
@@ -466,6 +497,7 @@ function wireSecretForm() {
         }
       }
       refreshSecretList();
+      refreshLiveSecrets();   // so the Sources panel stops saying "not connected"
     } catch (err) {
       msg.textContent = err.message;
     } finally {
@@ -499,7 +531,30 @@ $('#setupBtn').addEventListener('click', () => {
   const box = $('#setup');
   if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
   renderSetup();
+  refreshLiveSecrets();
 });
+
+/**
+ * Cross-check the panel against GitHub's actual settings.
+ *
+ * The panel is built from the snapshot, which is a point-in-time artifact. On
+ * its own it cannot distinguish "never set" from "set after this build", and
+ * it reported both as "not connected" -- which made correctly saved keys look
+ * like they had not saved at all.
+ */
+async function refreshLiveSecrets() {
+  if (!readToken()) return;
+  try {
+    const { api } = await ghModule();
+    const secrets = await api.listSecrets(readToken(), REPO);
+    LIVE_SECRETS = new Map(secrets.map((s) => [s.name, s.updatedAt]));
+    if (!$('#setup').classList.contains('hidden')) renderSetup();
+  } catch {
+    // A missing or expired token just means no cross-check; the snapshot view
+    // is still correct as far as it goes.
+    LIVE_SECRETS = null;
+  }
+}
 
 // A gesture alone is undiscoverable, and there is no gesture on a desktop.
 $('#refreshBtn').addEventListener('click', async () => {

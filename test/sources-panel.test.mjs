@@ -79,7 +79,9 @@ ok(mod !== null, 'app-static.js evaluated without throwing');
 const src = await readFile(CLIENT, 'utf8');
 const hooked = src.replace(
   /^\$\('#setupBtn'\)\.addEventListener[\s\S]*$/m,
-  'globalThis.__renderSetup = renderSetup;\nglobalThis.__setSnap = (s) => { SNAP = s; };\n',
+  'globalThis.__renderSetup = renderSetup;\n' +
+  'globalThis.__setSnap = (s) => { SNAP = s; };\n' +
+  'globalThis.__setLive = (m) => { LIVE_SECRETS = m; };\n',
 );
 // Written beside the original so its relative import of ./snapshot-crypto.mjs
 // still resolves; a data: URL cannot resolve relative specifiers.
@@ -128,8 +130,71 @@ ok(liveHtml.includes('src ok'), 'flags the working source as ok');
 ok(liveHtml.includes('HTTP 403'), 'surfaces a failed sync error instead of hiding it');
 ok(!liveHtml.includes('undefined'), 'no "undefined" in the populated render');
 
-console.log('\nMarkup is escaped (store errors are attacker-adjacent text)');
+console.log('\nA key saved since the last build is not reported as missing');
+// The reported bug: keys were saved correctly and the panel still said "not
+// connected", because it only ever saw the snapshot. Distinguishing the two
+// requires comparing the secret's updated_at against the snapshot's builtAt.
+const BUILT = '2026-08-10T01:00:00.000Z';
+const AFTER = '2026-08-10T01:30:00.000Z';
+const BEFORE = '2026-08-10T00:30:00.000Z';
+
 globalThis.__setSnap({
+  builtAt: BUILT,
+  counts: { owned: 0, subscriptions: 1812, priced: 0 },
+  entitled: ['pc'],
+  stores: {},
+  providers: {},
+});
+
+// (a) No live data at all -- must not claim anything it cannot know.
+globalThis.__setLive(null);
+globalThis.__renderSetup();
+ok(nodes.get('setup').innerHTML.includes('not connected'),
+   'without a token it still reports "not connected"');
+
+// (b) Secret exists and is NEWER than the snapshot -> pending, not missing.
+globalThis.__setLive(new Map([['ITAD_API_KEY', AFTER]]));
+globalThis.__renderSetup();
+let html = nodes.get('setup').innerHTML;
+ok(html.includes('rebuild pending'), 'a key saved after the build shows as "rebuild pending"');
+ok(html.includes('will be used by the next rebuild'), 'and explains why it is not visible yet');
+
+// (c) Secret exists, OLDER than the snapshot, still no data -> a real problem.
+globalThis.__setLive(new Map([['ITAD_API_KEY', BEFORE]]));
+globalThis.__renderSetup();
+html = nodes.get('setup').innerHTML;
+ok(html.includes('saved, but no data'),
+   'a key older than the build that produced nothing is flagged, not excused');
+ok(!html.includes('rebuild pending'), 'and is NOT mislabelled as pending');
+
+// (d) Multi-secret source: both must be present before it counts as saved.
+globalThis.__setLive(new Map([['STEAM_API_KEY', AFTER]]));   // STEAM_ID missing
+globalThis.__renderSetup();
+html = nodes.get('setup').innerHTML;
+const steamCard = html.slice(html.indexOf('Steam'), html.indexOf('Prices &'));
+ok(steamCard.includes('not connected'),
+   'a source needing two secrets is not "saved" with only one');
+
+// (e) A working source is never downgraded by the live check.
+globalThis.__setSnap({
+  builtAt: BUILT,
+  counts: { owned: 996, subscriptions: 1812, priced: 71 },
+  entitled: ['pc'],
+  stores: { steam: { ok: true, count: 996 } },
+  providers: { steam: { configured: true, note: 'ready' } },
+});
+globalThis.__setLive(new Map([['STEAM_API_KEY', AFTER], ['STEAM_ID', AFTER]]));
+globalThis.__renderSetup();
+html = nodes.get('setup').innerHTML;
+ok(html.includes('996 titles'), 'a working source still shows its count');
+ok(html.slice(html.indexOf('Steam'), html.indexOf('Prices &')).includes('src ok'),
+   'and stays marked ok even though its secrets are newer than the build');
+
+console.log('\nThe panel states what it is actually showing');
+ok(nodes.get('setup').innerHTML.includes('not GitHub'),
+   'says it reflects the snapshot rather than current settings');
+
+console.log('\nMarkup is escaped (store errors are attacker-adjacent text)');globalThis.__setSnap({
   builtAt: new Date().toISOString(),
   counts: { owned: 1, subscriptions: 0, priced: 0 },
   entitled: [],

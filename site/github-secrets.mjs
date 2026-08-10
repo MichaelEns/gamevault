@@ -104,12 +104,17 @@ export async function putVariable(token, repo, name, value) {
   return existing.ok ? 'updated' : 'created';
 }
 
-/** Names only -- GitHub never returns secret values, not even to the owner. */
-export async function listSecretNames(token, repo) {
+/** Secret names and when each was last set. GitHub never returns values. */
+export async function listSecrets(token, repo) {
   const res = await api(token, `/repos/${repo}/actions/secrets?per_page=100`);
   if (!res.ok) throw new Error(await describe(res, repo));
   const data = await res.json();
-  return (data.secrets ?? []).map((s) => s.name);
+  return (data.secrets ?? []).map((s) => ({ name: s.name, updatedAt: s.updated_at }));
+}
+
+/** Names only, for the simple "already set" line. */
+export async function listSecretNames(token, repo) {
+  return (await listSecrets(token, repo)).map((s) => s.name);
 }
 
 /** Kick off a rebuild so a newly added key takes effect immediately. */
