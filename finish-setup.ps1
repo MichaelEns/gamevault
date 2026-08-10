@@ -163,7 +163,6 @@ Good "GitHub access to $Repo confirmed"
 
 # --- what is already done? -------------------------------------------------
 Head 'Checking what is already configured'
-Get-BrokenProviders
 
 $existing = @{}
 try {
@@ -185,16 +184,22 @@ $script:BrokenProviders = @{}
 function Get-BrokenProviders {
     $runId = $null
     $out = $null
+    # --status success, not just the latest run: a build that is still running
+    # has no log yet, so taking the newest run unconditionally finds nothing
+    # and quietly concludes that every provider is healthy.
     if (Invoke-Native 'gh' @('run', 'list', '--repo', $Repo, '--workflow', 'snapshot.yml',
-                             '--limit', '1', '--json', 'databaseId',
+                             '--status', 'success', '--limit', '1', '--json', 'databaseId',
                              '--jq', '.[0].databaseId') -Output ([ref]$out)) {
-        $runId = ($out | Select-Object -Last 1)
+        $runId = ($out | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1)
     }
     if (-not $runId) { return }
     $log = $null
     if (-not (Invoke-Native 'gh' @('run', 'view', "$runId", '--repo', $Repo, '--log') -Output ([ref]$log))) { return }
     foreach ($line in $log) {
-        $m = [regex]::Match([string]$line, '^\s*(\w+)\s+FAILED:\s*(.+)$')
+        # Deliberately NOT anchored to the start of the line: gh prefixes every
+        # log line with job name, step name and a timestamp, so "^\s*(\w+)"
+        # never matched and this silently found nothing.
+        $m = [regex]::Match([string]$line, '(\w+)\s+FAILED:\s*(.+)$')
         if ($m.Success) {
             $script:BrokenProviders[$m.Groups[1].Value.ToLower()] = $m.Groups[2].Value.Trim()
         }
@@ -206,6 +211,12 @@ function Working($secretName, $provider) {
     if (-not (Have $secretName)) { return $false }
     return -not $script:BrokenProviders.ContainsKey($provider.ToLower())
 }
+
+# Only now, with every function defined, is it safe to call one. PowerShell
+# executes a script top to bottom, so a call placed above its definition fails
+# at run time while parsing cleanly - which is exactly how this shipped.
+Info 'Checking the last build for providers that failed...'
+Get-BrokenProviders
 
 foreach ($s in @('STEAM_API_KEY', 'STEAM_ID', 'ITAD_API_KEY', 'ITCH_API_KEY',
                  'LEGENDARY_CONFIG', 'NILE_CONFIG', 'UBISOFT_REMEMBER_TICKET',
