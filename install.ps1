@@ -147,7 +147,10 @@ if (-not $py) {
 
   if (-not (Test-Path $nile)) {
     Write-Host '         installing nile (Amazon Games)...' -ForegroundColor DarkGray
-    Invoke-Quiet '.\.venv\Scripts\pip.exe' @('install', '--quiet', 'git+https://github.com/imLinguin/nile.git') | Out-Null
+    Invoke-Quiet 'powershell' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                                (Join-Path $root 'tools\Install-Nile.ps1'),
+                                '-PipPath', (Join-Path $root '.venv\Scripts\pip.exe'),
+                                '-Quiet') | Out-Null
   }
   if (Test-Path $nile) { $haveNile = $true; Good 'nile installed (Amazon Games / Prime Gaming)' }
   else {

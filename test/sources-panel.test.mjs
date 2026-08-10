@@ -171,7 +171,7 @@ ok(!html.includes('rebuild pending'), 'and is NOT mislabelled as pending');
 globalThis.__setLive(new Map([['STEAM_API_KEY', AFTER]]));   // STEAM_ID missing
 globalThis.__renderSetup();
 html = nodes.get('setup').innerHTML;
-const steamCard = html.slice(html.indexOf('Steam'), html.indexOf('Prices &'));
+const steamCard = cardFor(html, 'Steam');
 ok(steamCard.includes('not connected'),
    'a source needing two secrets is not "saved" with only one');
 
@@ -187,12 +187,70 @@ globalThis.__setLive(new Map([['STEAM_API_KEY', AFTER], ['STEAM_ID', AFTER]]));
 globalThis.__renderSetup();
 html = nodes.get('setup').innerHTML;
 ok(html.includes('996 titles'), 'a working source still shows its count');
-ok(html.slice(html.indexOf('Steam'), html.indexOf('Prices &')).includes('src ok'),
+ok(cardFor(html, 'Steam').includes('src ok'),
    'and stays marked ok even though its secrets are newer than the build');
 
 console.log('\nThe panel states what it is actually showing');
 ok(nodes.get('setup').innerHTML.includes('not GitHub'),
    'says it reflects the snapshot rather than current settings');
+
+// Extract a whole source card by the label it contains. Index-slicing from the
+// label misses the opening tag, and therefore the class that carries the state.
+function cardFor(html, label) {
+  // parts[0] is everything BEFORE the first card -- including the intro, which
+  // mentions Steam. Skipping it is what makes this select a card rather than
+  // prose that happens to contain the same word.
+  const parts = html.split('<div class="src ').slice(1);
+  const hit = parts.find((p) => p.includes(label));
+  return hit ? `<div class="src ${hit}` : '';
+}
+
+console.log('\nA price source is judged on prices, not on a store record');
+// ITAD never appears in snapshot.stores because it is not an ownership
+// provider. Without its own signal it could only ever read "not connected",
+// however well it was working -- which is exactly what happened.
+globalThis.__setSnap({
+  builtAt: BUILT,
+  counts: { owned: 1012, subscriptions: 1812, priced: 71 },
+  entitled: ['pc'],
+  stores: { steam: { ok: true, count: 996 } },   // no `itad` key, by design
+  providers: { steam: { configured: true, note: 'ready' } },
+});
+globalThis.__setLive(new Map([['ITAD_API_KEY', BEFORE]]));
+globalThis.__renderSetup();
+html = nodes.get('setup').innerHTML;
+const itadCard = cardFor(html, 'Prices &');
+ok(itadCard.includes('71 titles priced'), 'ITAD reports the number of priced titles');
+ok(itadCard.includes('src ok'), 'and is marked working');
+ok(!itadCard.includes('not connected'), 'and is NOT reported as missing');
+
+// With no prices at all it must still report honestly.
+globalThis.__setSnap({
+  builtAt: BUILT,
+  counts: { owned: 1012, subscriptions: 1812, priced: 0 },
+  entitled: ['pc'], stores: {}, providers: {},
+});
+globalThis.__setLive(new Map([['ITAD_API_KEY', BEFORE]]));
+globalThis.__renderSetup();
+html = nodes.get('setup').innerHTML;
+ok(cardFor(html, 'Prices &').includes('saved, but no data'),
+   'zero priced titles with an older key is still flagged');
+
+console.log('\nA source known to be broken upstream says so plainly');
+// Ubisoft returns 403 errorCode 1002 for this client ID even with fake
+// credentials, so presenting it as a configuration problem would send the
+// user chasing their own password.
+globalThis.__setLive(new Map([['UBISOFT_EMAIL', AFTER], ['UBISOFT_PASSWORD', AFTER]]));
+globalThis.__renderSetup();
+html = nodes.get('setup').innerHTML;
+const ubiCard = cardFor(html, 'Ubisoft Connect');
+ok(ubiCard.includes('unavailable'), 'Ubisoft is labelled unavailable');
+ok(!ubiCard.includes('rebuild pending'),
+   'and is never described as pending, which would imply waiting would help');
+ok(/not about your account, password or 2FA/.test(ubiCard),
+   'and the note rules out the causes the user would otherwise suspect');
+ok(/delete UBISOFT_EMAIL/.test(ubiCard),
+   'and advises removing the stored password');
 
 console.log('\nMarkup is escaped (store errors are attacker-adjacent text)');globalThis.__setSnap({
   builtAt: new Date().toISOString(),

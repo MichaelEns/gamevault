@@ -54,14 +54,28 @@ jobs:
           if [ -n "$LEGENDARY_CONFIG" ]; then
             mkdir -p ~/.config/legendary
             echo "$LEGENDARY_CONFIG" | base64 -d > ~/.config/legendary/user.json
-            pip install --user legendary-gl || true
-            echo "GAMEVAULT_LEGENDARY_BIN=$HOME/.local/bin/legendary" >> "$GITHUB_ENV"
+            if pip install --user legendary-gl; then
+              echo "GAMEVAULT_LEGENDARY_BIN=$HOME/.local/bin/legendary" >> "$GITHUB_ENV"
+            else
+              echo "::warning::legendary install failed; Epic ownership will be skipped."
+            fi
           fi
           if [ -n "$NILE_CONFIG" ]; then
             mkdir -p ~/.config/nile
             echo "$NILE_CONFIG" | base64 -d > ~/.config/nile/user.json
-            pip install --user "git+https://github.com/imLinguin/nile.git" || true
-            echo "GAMEVAULT_NILE_BIN=$HOME/.local/bin/nile" >> "$GITHUB_ENV"
+            # nile cannot be pip-installed straight from git: its repo uses a
+            # flat layout where `assets/` is discovered as a package alongside
+            # `nile`, and modern setuptools refuses the ambiguity. This is not
+            # platform specific - it fails identically everywhere, and the
+            # `|| true` below used to hide it, producing a silent "nile is not
+            # installed" with no explanation. Naming the real packages fixes it.
+            git clone --depth 1 https://github.com/imLinguin/nile.git /tmp/nile
+            printf '\n[tool.setuptools.packages.find]\ninclude = ["nile*"]\n' >> /tmp/nile/pyproject.toml
+            if pip install --user /tmp/nile; then
+              echo "GAMEVAULT_NILE_BIN=$HOME/.local/bin/nile" >> "$GITHUB_ENV"
+            else
+              echo "::warning::nile install failed; Prime Gaming ownership will be skipped."
+            fi
           fi
 
       - name: Build snapshot

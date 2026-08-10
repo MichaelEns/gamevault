@@ -142,7 +142,8 @@ if ($SkipEpic) {
     }
     if (-not $haveNile) {
       Say '   installing nile (Amazon Games / Prime Gaming)...'
-      & .\.venv\Scripts\pip.exe install --quiet "git+https://github.com/imLinguin/nile.git" 2>$null
+      & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\Install-Nile.ps1') `
+        -PipPath (Join-Path $root '.venv\Scripts\pip.exe') -Quiet 2>$null
       if ($LASTEXITCODE -eq 0 -and (Test-Path $nile)) { $haveNile = $true }
     }
     if ($haveNile) {

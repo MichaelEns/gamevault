@@ -39,7 +39,11 @@ const SOURCES = [
     get: 'https://isthereanydeal.com/apps/my/',
     hint: 'Highest value single key: without it there are no prices at all, ' +
           'so every verdict is ownership-only.',
-    variable: false,
+    // ITAD is a PRICE source, not an ownership store, so it never appears in
+    // snapshot.stores. Without its own signal it could only ever read as
+    // "not connected", however well it was working.
+    check: (snap) => (snap?.counts?.priced ?? 0) > 0,
+    countLabel: (snap) => `${snap.counts.priced} titles priced`,
   },
   {
     key: 'itch', label: 'itch.io', unlocks: 'Your itch.io purchases and bundles',
@@ -66,8 +70,17 @@ const SOURCES = [
     key: 'ubisoft', label: 'Ubisoft Connect', unlocks: 'Your Ubisoft library',
     needs: ['UBISOFT_EMAIL', 'UBISOFT_PASSWORD'],
     get: null,
-    hint: 'Uses your account login rather than a key, and fails if 2FA is ' +
-          'enabled \u2014 Ubisoft offers no API key for personal libraries.',
+    // Verified directly, with deliberately fake credentials, and the response
+    // is identical: HTTP 403, errorCode 1002, "The Service: authentication, is
+    // not currently available for Application ...". Ubisoft has disabled
+    // authentication for this application ID at the gateway, so no password is
+    // going to help.
+    unavailable:
+      'Ubisoft has disabled logins for this client ID (HTTP 403, errorCode 1002). ' +
+      'Fake credentials get the identical response, so this is not about your ' +
+      'account, password or 2FA. Nothing can be retrieved until Ubisoft re-enables ' +
+      'it \u2014 you should delete UBISOFT_EMAIL and UBISOFT_PASSWORD rather than ' +
+      'leave an account password stored for a source that cannot work.',
   },
   {
     key: 'nintendo', label: 'Nintendo', unlocks: 'eShop prices (ownership is manual)',
@@ -235,29 +248,37 @@ function renderSetup() {
   const rows = SOURCES.map((s) => {
     const p = prov[s.key] ?? {};
     const st = stores[s.key];
-    // "Configured" comes from the builder; the store record proves it worked.
-    const working = st && st.ok !== false && (st.count ?? 0) > 0;
+    // A source may define its own success signal. Price sources never appear
+    // in snapshot.stores, so without this they can only ever read as absent.
+    const working = s.check
+      ? s.check(SNAP)
+      : Boolean(st && st.ok !== false && (st.count ?? 0) > 0);
 
     // A secret set after this snapshot was built cannot possibly be reflected
     // in it, however the build went.
-    const pending = !working && s.needs.length > 0 && live
+    const pending = !working && !s.unavailable && s.needs.length > 0 && live
       && s.needs.every((n) => live.has(n))
       && s.needs.some((n) => Date.parse(live.get(n)) > builtAt);
     // Present in GitHub, older than the snapshot, and still not working: the
     // build genuinely failed or found nothing, so keep showing why.
-    const savedButFailing = !working && !pending && s.needs.length > 0 && live
+    const savedButFailing = !working && !pending && !s.unavailable
+      && s.needs.length > 0 && live
       && s.needs.every((n) => live.has(n));
 
-    const state = working ? 'ok' : (pending || savedButFailing || p.configured ? 'warn' : 'off');
-    const badge = working ? `${st.count} titles`
+    const state = s.unavailable ? 'off'
+                : working ? 'ok'
+                : (pending || savedButFailing || p.configured ? 'warn' : 'off');
+    const badge = s.unavailable ? 'unavailable'
+                : working ? (s.countLabel ? s.countLabel(SNAP) : `${st.count} titles`)
                 : pending ? 'saved \u2014 rebuild pending'
                 : savedButFailing ? 'saved, but no data'
                 : p.configured ? 'configured, nothing synced'
                 : 'not connected';
-    const note = pending
-      ? 'This key was added after the current snapshot was built. It will be used by the next rebuild.'
-      : st?.error ? `Last sync failed: ${st.error}`
-      : (p.note && p.note !== 'ready' ? p.note : s.hint ?? '');
+    const note = s.unavailable ? s.unavailable
+                : pending
+                ? 'This key was added after the current snapshot was built. It will be used by the next rebuild.'
+                : st?.error ? `Last sync failed: ${st.error}`
+                : (p.note && p.note !== 'ready' ? p.note : s.hint ?? '');
 
     const links = [];
     if (s.get) links.push(`<a href="${s.get}" target="_blank" rel="noopener">Get key</a>`);
