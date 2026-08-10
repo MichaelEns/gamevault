@@ -89,6 +89,11 @@ jobs:
           STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
           STEAM_ID: ${{ secrets.STEAM_ID }}
           ITCH_API_KEY: ${{ secrets.ITCH_API_KEY }}
+          # EA (formerly Origin). Origin's API is dead, but libraries moved to
+          # the EA app and EA's Juno layer still serves them. EA_REMID is the
+          # long-lived browser cookie, obtained with tools/ea-auth.mjs.
+          EA_REMID: ${{ secrets.EA_REMID }}
+          EA_SID: ${{ secrets.EA_SID }}
           # Ubisoft Connect. Preferred is UBISOFT_REMEMBER_TICKET, obtained once
           # with tools/ubisoft-auth.mjs: it clears 2FA (which a password alone
           # cannot), grants only session creation, and is revocable on its own.

@@ -18,6 +18,7 @@
     "verify-subs": "node test/gp-verify.mjs",
     "epic-auth": ".venv\\Scripts\\legendary auth",
     "epic-status": ".venv\\Scripts\\legendary status",
+    "ea-auth": "node tools/ea-auth.mjs",
     "ubisoft-auth": "node tools/ubisoft-auth.mjs",
     "amazon-auth": ".venv\\Scripts\\nile auth --login",
     "amazon-status": ".venv\\Scripts\\nile auth --status",

@@ -46,6 +46,15 @@ const SOURCES = [
     countLabel: (snap) => `${snap.counts.priced} titles priced`,
   },
   {
+    key: 'ea', label: 'EA (was Origin)', unlocks: 'Your EA / Origin purchases',
+    needs: ['EA_REMID'],
+    get: 'https://www.ea.com',
+    hint: 'Origin shut down, but libraries moved to the EA app on the same ' +
+          'account and EA still serves them. There is no EA CLI, so run ' +
+          '"npm run ea-auth" once on a PC to copy the remid cookie from a ' +
+          'signed-in browser.',
+  },
+  {
     key: 'itch', label: 'itch.io', unlocks: 'Your itch.io purchases and bundles',
     needs: ['ITCH_API_KEY'],
     get: 'https://itch.io/user/settings/api-keys',
@@ -404,6 +413,7 @@ function renderConnect(state = {}) {
         <option value="STEAM_API_KEY">STEAM_API_KEY &mdash; Steam ownership</option>
         <option value="STEAM_ID">STEAM_ID &mdash; your profile URL is fine</option>
         <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
+        <option value="EA_REMID">EA_REMID &mdash; EA / Origin library</option>
         <option value="UBISOFT_REMEMBER_TICKET">UBISOFT_REMEMBER_TICKET &mdash; Ubisoft (clears 2FA)</option>
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
         <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; no 2FA accounts only</option>
