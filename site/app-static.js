@@ -88,8 +88,12 @@ const SOURCES = [
     key: 'nintendo', label: 'Nintendo', unlocks: 'eShop prices (ownership is manual)',
     needs: [],
     get: null,
-    hint: 'Nintendo exposes no purchase-history API. Prices work; ' +
-          'ownership has to be typed into the manual library.',
+    hint: 'Nintendo exposes no purchase API. Purchase history exists only as a ' +
+          'web page at ec.nintendo.com/my/transactions. nxapi cannot help: it ' +
+          'covers friends, presence and Parental Controls, and its play records ' +
+          'show what you PLAYED \u2014 which includes demos, borrowed cartridges and ' +
+          'the NSO classics library you do not own. Prices work; ownership has to ' +
+          'be typed into the manual library.',
   },
 ];
 
