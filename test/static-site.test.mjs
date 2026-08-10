@@ -44,7 +44,8 @@ try {
   console.log('Every file the PWA needs is served');
   for (const f of ['/', '/app-static.js', '/snapshot-crypto.mjs', '/style.css',
                    '/manifest.webmanifest', '/sw.js', '/snapshot.json',
-                   '/snapshot-meta.json', '/icon-192.png', '/icon-180.png']) {
+                   '/snapshot-meta.json', '/icon-192.png', '/icon-180.png',
+                   '/sealbox.js', '/github-secrets.mjs']) {
     const r = await fetch(BASE + f);
     ok(r.ok, `${f} -> ${r.status}`);
   }
@@ -152,6 +153,21 @@ try {
      'but never while unlocked - the snapshot is memory-only and would be lost');
   ok(/__gvUnlocked = true/.test(appSrc) && /__gvUnlocked = false/.test(appSrc),
      'the unlocked flag is both set on unlock and cleared on lock');
+
+  console.log('\nThe GitHub token never leaves this origin or reaches the snapshot');
+  ok(/api\.github\.com/.test(await (await fetch(`${BASE}/github-secrets.mjs`)).text()),
+     'secrets client targets api.github.com');
+  const ghSrc = await (await fetch(`${BASE}/github-secrets.mjs`)).text();
+  const hosts = [...ghSrc.matchAll(/https:\/\/([a-z0-9.-]+)/g)].map((m) => m[1]);
+  ok(hosts.every((h) => h === 'api.github.com'),
+     `only api.github.com is contacted (found: ${[...new Set(hosts)].join(', ')})`);
+  ok(!/console\.(log|warn|error)\s*\(\s*[^)]*token/i.test(appSrc + ghSrc),
+     'the token is never logged');
+  // A token in the snapshot would be published to a public repo.
+  const snapText = await (await fetch(`${BASE}/snapshot.json`)).text();
+  ok(!/gv\.ghtoken|github_pat_|ghp_/.test(snapText), 'no token material in the published snapshot');
+  ok(/lazily|import\('\.\/sealbox\.js'\)/.test(appSrc),
+     'the 40KB crypto bundle is imported lazily, not on every launch');
 
   console.log('\nEvery service-worker precache entry actually exists');
   // addAll() is all-or-nothing: a single 404 (the old '/app.js', which this

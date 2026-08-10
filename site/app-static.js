@@ -298,6 +298,194 @@ $('#setup').addEventListener('click', async (e) => {
   }
 });
 
+/* ---------- setting keys from inside the app ----------
+ *
+ * There is deliberately no "Sign in with GitHub" here, and it is not an
+ * oversight. github.com/login/device/code and /login/oauth/access_token send
+ * no Access-Control-Allow-Origin header at all, so neither the device flow nor
+ * the OAuth code flow can run in a page; the code flow would also need a
+ * client secret, which cannot exist in a public static site.
+ *
+ * api.github.com, however, sends Access-Control-Allow-Origin: *, including on
+ * the Actions secrets endpoints. So the app cannot log in, but it can act with
+ * a token you paste in once.
+ *
+ * The token is stored only in this origin's localStorage and sent only to
+ * api.github.com. It is never written into the snapshot, never logged, and
+ * never included in an error message.
+ */
+const TOKEN_KEY = 'gv.ghtoken';
+const readToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const writeToken = (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* private mode */ } };
+const clearToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } };
+
+let GH = null;   // lazily imported { nacl, blake2b } + api helpers
+
+async function ghModule() {
+  if (!GH) {
+    // ~40KB of vendored crypto; only fetched if you actually connect.
+    const [sealbox, api] = await Promise.all([
+      import('./sealbox.js'),
+      import('./github-secrets.mjs'),
+    ]);
+    GH = { deps: { nacl: sealbox.nacl, blake2b: sealbox.blake2b }, api };
+  }
+  return GH;
+}
+
+function renderConnect(state = {}) {
+  const box = $('#connect');
+  const token = readToken();
+  const owner = REPO.split('/')[0];
+
+  box.innerHTML = token ? `
+    <h2 class="setup-title">Add a key</h2>
+    <p class="setup-intro">
+      Connected to <code>${esc(REPO)}</code>. Values are sealed in this browser
+      with the repository&rsquo;s public key before they are sent, so GitHub
+      receives ciphertext and nothing readable is ever transmitted.
+    </p>
+    <form id="secretForm" class="secret-form">
+      <label for="secretName">Secret</label>
+      <select id="secretName">
+        <option value="ITAD_API_KEY">ITAD_API_KEY &mdash; prices and historical lows</option>
+        <option value="STEAM_API_KEY">STEAM_API_KEY &mdash; Steam ownership</option>
+        <option value="STEAM_ID">STEAM_ID &mdash; your profile URL is fine</option>
+        <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
+        <option value="LEGENDARY_CONFIG">LEGENDARY_CONFIG &mdash; Epic (base64)</option>
+        <option value="NILE_CONFIG">NILE_CONFIG &mdash; Prime Gaming (base64)</option>
+      </select>
+      <label for="secretValue">Value</label>
+      <input id="secretValue" type="password" autocomplete="off" autocapitalize="off"
+             autocorrect="off" spellcheck="false" placeholder="Paste the key">
+      <label class="inline"><input id="thenRun" type="checkbox" checked> Rebuild the snapshot afterwards</label>
+      <button type="submit">Save to GitHub</button>
+    </form>
+    <p id="connectMsg" class="src-note">${esc(state.msg ?? '')}</p>
+    <p class="setup-foot">
+      Already set: <span id="secretList">${esc(state.names ?? 'checking\u2026')}</span><br>
+      <a href="#" id="disconnectBtn">Disconnect</a> &mdash; removes the token from this device.
+    </p>`
+  : `
+    <h2 class="setup-title">Add keys from this app</h2>
+    <p class="setup-intro">
+      GitHub&rsquo;s OAuth and device-flow endpoints send no CORS headers, so
+      this app cannot offer a &ldquo;Sign in with GitHub&rdquo; button &mdash;
+      no page on any origin can. The REST API does allow browser requests, so a
+      token works instead.
+    </p>
+    <ol class="steps">
+      <li>Open <a href="https://github.com/settings/personal-access-tokens/new"
+                  target="_blank" rel="noopener">fine-grained token</a>
+          (sign in as <code>${esc(owner)}</code>).</li>
+      <li>Repository access &rarr; <strong>Only select repositories</strong> &rarr;
+          <code>${esc(REPO)}</code>.</li>
+      <li>Repository permissions &rarr; <strong>Secrets: Read and write</strong>.
+          Add <strong>Actions: Read and write</strong> too if you want the app to
+          trigger rebuilds.</li>
+      <li>Paste it below.</li>
+    </ol>
+    <form id="tokenForm" class="secret-form">
+      <input id="ghToken" type="password" autocomplete="off" autocapitalize="off"
+             autocorrect="off" spellcheck="false" placeholder="github_pat_...">
+      <button type="submit">Connect</button>
+    </form>
+    <p id="connectMsg" class="src-note">${esc(state.msg ?? '')}</p>
+    <p class="setup-foot">
+      The token stays in this browser and is sent only to api.github.com. Scope
+      it to this one repository so it can do nothing else.
+    </p>`;
+  box.classList.remove('hidden');
+
+  if (token) wireSecretForm(); else wireTokenForm();
+}
+
+function wireTokenForm() {
+  $('#tokenForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = $('#ghToken');
+    const token = input.value.trim();
+    const msg = $('#connectMsg');
+    if (!token) return;
+    msg.textContent = 'Checking\u2026';
+    try {
+      const { api } = await ghModule();
+      // Prove the token can do the job before storing it, rather than
+      // discovering it is under-scoped at the moment you try to save a key.
+      await api.getPublicKey(token, REPO);
+      writeToken(token);
+      input.value = '';
+      renderConnect({ msg: 'Connected.' });
+      refreshSecretList();
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
+}
+
+function wireSecretForm() {
+  $('#disconnectBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    clearToken();
+    renderConnect({ msg: 'Token removed from this device.' });
+  });
+
+  $('#secretForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('#secretName').value;
+    const valueEl = $('#secretValue');
+    const value = valueEl.value.trim();
+    const msg = $('#connectMsg');
+    const btn = $('#secretForm button');
+    if (!value) { msg.textContent = 'Enter a value first.'; return; }
+
+    btn.disabled = true;
+    msg.textContent = 'Encrypting and sending\u2026';
+    try {
+      const { api, deps } = await ghModule();
+      const token = readToken();
+      const what = await api.putSecret(token, REPO, name, value, deps);
+      valueEl.value = '';           // never leave a key sitting in the field
+      msg.textContent = `${name} ${what}.`;
+
+      if ($('#thenRun').checked) {
+        try {
+          await api.runWorkflow(token, REPO);
+          msg.textContent = `${name} ${what}. Rebuild started \u2014 refresh in a minute or two.`;
+        } catch (err) {
+          msg.textContent = `${name} ${what}, but the rebuild could not start: ${err.message}`;
+        }
+      }
+      refreshSecretList();
+    } catch (err) {
+      msg.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+async function refreshSecretList() {
+  const el = $('#secretList');
+  if (!el) return;
+  try {
+    const { api } = await ghModule();
+    const names = await api.listSecretNames(readToken(), REPO);
+    // SNAPSHOT_PASSPHRASE is set up separately and is not a data source.
+    const shown = names.filter((n) => n !== 'SNAPSHOT_PASSPHRASE');
+    el.textContent = shown.length ? shown.join(', ') : 'none yet';
+  } catch (err) {
+    el.textContent = err.message;
+  }
+}
+
+$('#connectBtn').addEventListener('click', () => {
+  const box = $('#connect');
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  renderConnect();
+  if (readToken()) refreshSecretList();
+});
+
 $('#setupBtn').addEventListener('click', () => {
   const box = $('#setup');
   if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
