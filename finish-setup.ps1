@@ -27,7 +27,11 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('epic', 'amazon', 'ubisoft', 'ea', 'humble', 'nintendo')]
+    # Deliberately NOT [ValidateSet]: that error fires before the script body
+    # runs, so it cannot explain itself. PowerShell takes a single dash, and
+    # "--only ea" binds "--only" as the VALUE of -Only, producing a message
+    # about the argument not being in the set - which points at the wrong
+    # thing entirely. Validated below instead, with an answer.
     [string[]] $Only,
 
     [string] $Repo = 'MichaelEns/gamevault',
@@ -108,6 +112,34 @@ function Step {
 
 $want = { param($n) (-not $Only) -or ($Only -contains $n) }
 
+# --- validate -Only, helpfully ----------------------------------------------
+$VALID_STORES = @('epic', 'amazon', 'ubisoft', 'ea', 'humble', 'nintendo')
+if ($Only) {
+    # "--only ea" binds "--only" as the first VALUE of -Only and pushes "ea"
+    # into the NEXT positional parameter, which is -Repo. So the store name is
+    # recoverable from there, and the corrected command can be shown verbatim
+    # rather than described.
+    $doubleDash = @($Only | Where-Object { $_ -like '--*' })
+    if ($doubleDash.Count) {
+        $store = if ($Repo -notmatch '/') { $Repo } else { '<store>' }
+        Bad 'PowerShell parameters take a single dash, not two.'
+        Info ''
+        Info "  Use:  .\finish-setup.ps1 -Only $store"
+        Info ''
+        Info 'With two dashes PowerShell reads "--only" as a value rather than a'
+        Info 'parameter name, and the store name lands in the wrong parameter.'
+        exit 1
+    }
+    $unknown = $Only | Where-Object { $VALID_STORES -notcontains $_.ToLower() }
+    if ($unknown) {
+        Bad "Not a known store: $($unknown -join ', ')"
+        Info "Choose from: $($VALID_STORES -join ', ')"
+        Info "For example: .\finish-setup.ps1 -Only ea,ubisoft"
+        exit 1
+    }
+    $Only = $Only | ForEach-Object { $_.ToLower() }
+}
+
 # --- prerequisites ---------------------------------------------------------
 Head 'Checking prerequisites'
 
@@ -148,7 +180,11 @@ if (-not (Test-RepoAccess)) {
     }
     if (-not (Test-RepoAccess)) {
         Warn "Cannot reach $Repo. Signing in."
-        gh auth login
+        # Start-Process, not a bare call: gh auth login draws an arrow-key menu
+        # and that needs a real console. Invoked inline its output is consumed
+        # by the pipeline, so the menu renders but the arrow keys do nothing -
+        # the same class of failure as an invisible prompt.
+        Start-Process -FilePath 'gh' -ArgumentList @('auth', 'login') -NoNewWindow -Wait
     }
 }
 
