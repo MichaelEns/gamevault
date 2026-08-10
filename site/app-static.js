@@ -25,8 +25,10 @@ const SOURCES = [
     key: 'steam', label: 'Steam', unlocks: 'Everything you own on Steam',
     needs: ['STEAM_API_KEY', 'STEAM_ID'],
     get: 'https://steamcommunity.com/dev/apikey',
-    hint: 'Free key. Your profile\u2019s "Game details" must be set to Public, ' +
-          'or Steam returns an empty list rather than an error.',
+    hint: 'Free key. STEAM_ID accepts your profile URL \u2014 either ' +
+          'steamcommunity.com/id/yourname or .../profiles/7656... \u2014 so you do ' +
+          'not need to look up a SteamID64. Your profile\u2019s "Game details" must ' +
+          'be set to Public, or Steam returns an empty list rather than an error.',
   },
   {
     key: 'itad', label: 'Prices & historical lows', unlocks: 'Is this actually a good price?',
@@ -229,6 +231,9 @@ function renderSetup() {
     const links = [];
     if (s.get) links.push(`<a href="${s.get}" target="_blank" rel="noopener">Get key</a>`);
     if (s.needs.length) links.push(`<a href="${SECRETS_URL}" target="_blank" rel="noopener">Add secret</a>`);
+    if (s.needs.length) {
+      links.push(`<a href="#" data-copy="${esc(SECRETS_URL)}" class="copyable">Copy link</a>`);
+    }
 
     return `<div class="src ${state}">
       <div class="src-head">
@@ -237,7 +242,9 @@ function renderSetup() {
       </div>
       <div class="src-body">
         <div class="src-unlocks">${esc(s.unlocks)}</div>
-        ${s.needs.length ? `<code>${s.needs.map(esc).join('</code> <code>')}</code>` : ''}
+        ${s.needs.length
+          ? s.needs.map((n) => `<code class="copyable" data-copy="${esc(n)}" title="Copy name">${esc(n)}</code>`).join(' ')
+          : ''}
         ${note ? `<p class="src-note">${esc(note)}</p>` : ''}
         ${links.length ? `<p class="src-links">${links.join(' · ')}</p>` : ''}
       </div>
@@ -252,6 +259,15 @@ function renderSetup() {
       so signing in here could not fetch your library even if it were offered
       &mdash; that restriction is on the browser origin, not on the login.
     </p>
+    <p class="setup-warn">
+      <strong>If &ldquo;Add secret&rdquo; shows a 404:</strong> that is GitHub
+      hiding the page, not a broken link. Repository settings return 404 rather
+      than 403 when you are signed out, or signed in as an account without
+      access to <code>${esc(REPO)}</code>. Sign in as
+      <code>${esc(REPO.split('/')[0])}</code> and open the link again, or use
+      <span class="copyable" data-copy="gh secret set STEAM_API_KEY --repo ${esc(REPO)}"><code>gh secret set</code></span>
+      on a PC, which never puts the key on screen.
+    </p>
     ${rows}
     <p class="setup-foot">
       Subscriptions: <a href="${VARS_URL}" target="_blank" rel="noopener">SUBSCRIPTIONS variable</a>
@@ -262,6 +278,25 @@ function renderSetup() {
     </p>`;
   box.classList.remove('hidden');
 }
+
+// Tap-to-copy for secret names, links and the CLI command. On a phone the
+// realistic path is "copy this, paste it into a browser where you are actually
+// signed in", so copying has to work without a keyboard.
+$('#setup').addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-copy]');
+  if (!el) return;
+  e.preventDefault();
+  const text = el.getAttribute('data-copy');
+  try {
+    await navigator.clipboard.writeText(text);
+    const prev = el.textContent;
+    el.textContent = 'Copied';
+    setTimeout(() => { el.textContent = prev; }, 1200);
+  } catch {
+    // Clipboard access can be refused; showing the value still lets them act.
+    showNotice(`Copy this: ${text}`);
+  }
+});
 
 $('#setupBtn').addEventListener('click', () => {
   const box = $('#setup');
