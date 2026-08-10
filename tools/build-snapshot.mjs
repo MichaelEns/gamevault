@@ -28,7 +28,11 @@ import { syncLibrary, loadLibrary, providerStatus } from '../lib/library.mjs';
 
 const OUT_DIR = path.join(PATHS.root, 'site');
 const ENV = process.env;
-const COUNTRY = ENV.COUNTRY ?? 'US';
+// GitHub Actions passes an EMPTY STRING for a variable that is not set, not
+// undefined, so `??` never fires for it. Using `||` is what actually applies
+// the default -- with `??`, an unset SNAPSHOT_PRICE_LIMIT becomes Number('')
+// === 0 and the build silently prices nothing.
+const COUNTRY = ENV.COUNTRY || 'US';
 
 const log = (m) => console.log(`  ${m}`);
 
@@ -94,7 +98,7 @@ async function main() {
   // still get prices so the app can show "you own this, and it is 80% off"
   // -- useful for gifting, and for spotting a better edition.
   const wanted = [...new Set([...watchlist, ...ownedTitles].map((t) => t.trim()).filter(Boolean))];
-  const cap = Number(ENV.SNAPSHOT_PRICE_LIMIT ?? 400);
+  const cap = Number(ENV.SNAPSHOT_PRICE_LIMIT) || 400;
   const priceTargets = wanted.slice(0, cap);
   if (wanted.length > cap) {
     log(`capping at ${cap} titles (set SNAPSHOT_PRICE_LIMIT to raise)`);

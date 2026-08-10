@@ -75,10 +75,17 @@ jobs:
           STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
           STEAM_ID: ${{ secrets.STEAM_ID }}
           ITCH_API_KEY: ${{ secrets.ITCH_API_KEY }}
+          # Ubisoft Connect. Its own login, so email + password rather than a
+          # key; fails if the account has 2FA enabled.
+          UBISOFT_EMAIL: ${{ secrets.UBISOFT_EMAIL }}
+          UBISOFT_PASSWORD: ${{ secrets.UBISOFT_PASSWORD }}
           # Which Game Pass tier you actually pay for. Getting this wrong
           # makes the app claim a console-only game is "included".
           SUBSCRIPTIONS: ${{ vars.SUBSCRIPTIONS }}
           COUNTRY: ${{ vars.COUNTRY || 'US' }}
+          # How many titles to price per build. Raise if the library outgrows
+          # the default and prices start getting truncated.
+          SNAPSHOT_PRICE_LIMIT: ${{ vars.SNAPSHOT_PRICE_LIMIT }}
         run: node tools/build-snapshot.mjs
 
       - name: Fail if the snapshot is unencrypted

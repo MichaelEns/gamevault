@@ -60,6 +60,13 @@ const SOURCES = [
           'internal amazon hosts that do not resolve publicly.',
   },
   {
+    key: 'ubisoft', label: 'Ubisoft Connect', unlocks: 'Your Ubisoft library',
+    needs: ['UBISOFT_EMAIL', 'UBISOFT_PASSWORD'],
+    get: null,
+    hint: 'Uses your account login rather than a key, and fails if 2FA is ' +
+          'enabled \u2014 Ubisoft offers no API key for personal libraries.',
+  },
+  {
     key: 'nintendo', label: 'Nintendo', unlocks: 'eShop prices (ownership is manual)',
     needs: [],
     get: null,
@@ -352,6 +359,8 @@ function renderConnect(state = {}) {
         <option value="STEAM_API_KEY">STEAM_API_KEY &mdash; Steam ownership</option>
         <option value="STEAM_ID">STEAM_ID &mdash; your profile URL is fine</option>
         <option value="ITCH_API_KEY">ITCH_API_KEY &mdash; itch.io purchases</option>
+        <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
+        <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; fails if 2FA is on</option>
         <option value="LEGENDARY_CONFIG">LEGENDARY_CONFIG &mdash; Epic (base64)</option>
         <option value="NILE_CONFIG">NILE_CONFIG &mdash; Prime Gaming (base64)</option>
       </select>
