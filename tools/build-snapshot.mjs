@@ -191,30 +191,48 @@ async function main() {
   if (!freebies.length) log('nothing free right now');
 
   // ---- 5. Assemble -------------------------------------------------------
-  // EA rotates its remid cookie when it is used, so the stored secret is spent
-  // after a single build. Writing the replacement back is the only way a
-  // scheduled build keeps working; without it EA would sync once and then fail
-  // every time, looking exactly like an expired credential.
-  if (ENV.EA_REMID && ENV.GAMEVAULT_SECRETS_TOKEN) {
+  // Some providers hand out rotating credentials: EA replaces its remid
+  // cookie, Ubisoft issues a new remember-me ticket, and in both cases the old
+  // value stops working. A stored secret is therefore spent after a single
+  // build unless the replacement is written back - which produces the
+  // particularly confusing failure of a source that syncs once and then never
+  // again, looking exactly like a bad credential.
+  if (ENV.GAMEVAULT_SECRETS_TOKEN && ENV.GITHUB_REPOSITORY) {
+    const rotations = [];
     try {
-      const ea = await import('../lib/ea.mjs');
-      const fresh = ea.currentCookies(ENV);
-      if (fresh.remid && fresh.remid !== ENV.EA_REMID) {
+      const eaMod = await import('../lib/ea.mjs');
+      const fresh = eaMod.currentCookies(ENV);
+      if (ENV.EA_REMID && fresh.remid && fresh.remid !== ENV.EA_REMID) {
+        rotations.push(['EA_REMID', fresh.remid]);
+      }
+      if (fresh.sid && fresh.sid !== ENV.EA_SID) rotations.push(['EA_SID', fresh.sid]);
+    } catch { /* EA not configured */ }
+    try {
+      const ubiMod = await import('../lib/ubisoft.mjs');
+      if (ubiMod.rotatedTicket) rotations.push(['UBISOFT_REMEMBER_TICKET', ubiMod.rotatedTicket]);
+    } catch { /* Ubisoft not configured */ }
+
+    if (rotations.length) {
+      try {
         const [{ putSecret }, nacl, blakejs] = await Promise.all([
           import('../lib/github-secrets.mjs'),
           import('tweetnacl').then((m) => m.default ?? m),
           import('blakejs'),
         ]);
-        const repo = ENV.GITHUB_REPOSITORY;
-        await putSecret(ENV.GAMEVAULT_SECRETS_TOKEN, repo, 'EA_REMID', fresh.remid,
-                        { nacl, blake2b: blakejs.blake2b });
-        console.log('  EA issued a replacement cookie; EA_REMID updated.');
+        for (const [name, value] of rotations) {
+          await putSecret(ENV.GAMEVAULT_SECRETS_TOKEN, ENV.GITHUB_REPOSITORY, name, value,
+                          { nacl, blake2b: blakejs.blake2b });
+          console.log(`  ${name} refreshed (the provider rotated it).`);
+        }
+      } catch (e) {
+        // Never fatal: a snapshot built with a now-stale credential is still a
+        // good snapshot, and the next build will report the source as failing.
+        console.log(`  could not refresh rotated credentials: ${e.message}`);
       }
-    } catch (e) {
-      // Never fatal: a snapshot without a refreshed cookie is still a good
-      // snapshot, and the next build will simply report EA as failing.
-      console.log(`  could not update EA_REMID: ${e.message}`);
     }
+  } else if (ENV.EA_REMID || ENV.UBISOFT_REMEMBER_TICKET) {
+    console.log('  note: EA and Ubisoft rotate their credentials. Without ' +
+                'GAMEVAULT_SECRETS_TOKEN they will work once and then need re-authenticating.');
   }
   // Which providers are wired up, so the app can explain an empty library
   // instead of just showing "0 games owned". This goes INSIDE the encrypted
