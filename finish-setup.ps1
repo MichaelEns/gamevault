@@ -388,13 +388,25 @@ function Invoke-AuthTool {
     $outFile = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-" + [guid]::NewGuid().ToString('N') + '.txt')
     Push-Location $root
     try {
-        $prev = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        # No redirection and no pipeline: the tool owns the console so its
-        # prompts appear and its input works.
-        & node $Script --out $outFile
-        $ErrorActionPreference = $prev
-
+        # Start-Process -NoNewWindow hands node the REAL console.
+        #
+        # Neither `& node ...` nor a pipe works here. The caller assigns this
+        # function's result ($x = Invoke-AuthTool ...), and assignment captures
+        # everything the function writes to the success stream - which includes
+        # anything a native command inside it prints. So the prompt was being
+        # swallowed into the return value rather than shown, and the script sat
+        # waiting for input the user could not see. Removing the earlier pipe
+        # fixed only half of that.
+        #
+        # With the child owning the console, its prompts appear immediately,
+        # its input works, and nothing it prints can leak into the result.
+        $proc = Start-Process -FilePath 'node' `
+                              -ArgumentList (@($Script, '--out', $outFile)) `
+                              -NoNewWindow -Wait -PassThru
+        if ($proc.ExitCode -ne 0) {
+            Warn "The sign-in tool exited with code $($proc.ExitCode)."
+            return $null
+        }
         if (-not (Test-Path $outFile)) {
             Warn "The sign-in did not complete, so no $SecretName was produced."
             return $null
