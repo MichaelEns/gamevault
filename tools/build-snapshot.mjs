@@ -206,6 +206,10 @@ async function main() {
         rotations.push(['EA_REMID', fresh.remid]);
       }
       if (fresh.sid && fresh.sid !== ENV.EA_SID) rotations.push(['EA_SID', fresh.sid]);
+      // Printed so the schedule can be checked against reality: if a cookie
+      // lives less than the six hours between builds, the refresh chain
+      // cannot sustain itself and that needs to be visible.
+      if (eaMod.cookieLifetimes) log(`EA cookie lifetimes: ${eaMod.cookieLifetimes}`);
     } catch { /* EA not configured */ }
     try {
       const ubiMod = await import('../lib/ubisoft.mjs');
