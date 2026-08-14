@@ -22,17 +22,18 @@ const ok = (cond, msg) => {
   else console.log(`  ok:   ${msg}`);
 };
 
-const workflow = await readFile(
-  path.join(PATHS.root, '.github', 'workflows', 'snapshot.yml'), 'utf8');
-
-// Claiming moved into its own workflow so a Playwright failure could not
-// disturb the library sync. Its env block is just as load-bearing, and
-// checking only snapshot.yml reported BROWSER_STATE as unwired when it was
-// wired correctly all along - a false alarm that trains you to ignore the
-// suite. Wiring is satisfied by EITHER workflow.
-const claimWorkflow = await readFile(
-  path.join(PATHS.root, '.github', 'workflows', 'claim.yml'), 'utf8');
-const anyWorkflow = `${workflow}\n${claimWorkflow}`;
+// Read every workflow rather than a named one. Wiring is satisfied if ANY
+// workflow passes the variable through, and deriving the list means adding or
+// removing a workflow cannot silently break this test or create a false alarm
+// about a variable that is wired somewhere else.
+const workflowDir = path.join(PATHS.root, '.github', 'workflows');
+const { readdir } = await import('node:fs/promises');
+const workflowFiles = (await readdir(workflowDir)).filter((f) => /\.ya?ml$/.test(f));
+const workflows = Object.fromEntries(await Promise.all(
+  workflowFiles.map(async (f) => [f, await readFile(path.join(workflowDir, f), 'utf8')]),
+));
+const workflow = workflows['snapshot.yml'];
+const anyWorkflow = Object.values(workflows).join('\n');
 
 const sources = [];
 for (const dir of ['lib', 'tools']) {
@@ -50,7 +51,7 @@ const NOT_FROM_CI = new Set([
   'GAMEVAULT_PASSWORD', 'GAMEVAULT_PASSWORD_HASH',
   'PORT', 'HOST', 'TRUST_PROXY', 'NODE_ENV',
   // Set by the Actions runner itself; wiring it would be redundant.
-  'GITHUB_ACTIONS', 'GITHUB_STEP_SUMMARY',
+  'GITHUB_ACTIONS',
 ]);
 
 console.log('Every configurable the build reads is passed by the workflow');
