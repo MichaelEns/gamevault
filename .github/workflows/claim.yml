@@ -112,7 +112,24 @@ jobs:
         # The library sync is what proves a claim actually arrived. Triggering
         # it here means verification happens promptly rather than at the next
         # six-hourly build.
+        #
+        # Only when something was actually claimed. An unconditional rebuild
+        # fires an extra build every single day with nothing to verify, and
+        # those builds are not free: an unscheduled run can overlap the
+        # six-hourly cron, and overlapping runs are exactly what spends a
+        # rotating credential twice and breaks Ubisoft.
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run snapshot.yml --ref main || true
+        run: |
+          [ -f claim-result.json ] || exit 0
+          CLAIMED=$(node -e "
+            const r=require('./claim-result.json');
+            process.stdout.write(String((r.claimed||[]).length));
+          ")
+          if [ "$CLAIMED" = "0" ]; then
+            echo "Nothing claimed, so there is nothing to verify. Not triggering a build."
+            exit 0
+          fi
+          echo "Claimed ${CLAIMED} game(s); triggering a snapshot build to verify them."
+          gh workflow run snapshot.yml --ref main || true

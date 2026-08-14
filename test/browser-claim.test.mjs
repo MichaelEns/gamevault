@@ -85,5 +85,69 @@ ok(loops.length > 0, `found ${loops.length} claim loops`);
 ok(loops.every((l) => /Math\.min|\d+/.test(l)), `all bounded: ${loops.join(' | ')}`);
 
 console.log('');
+
+// ---- setup failures must be reportable -------------------------------------
+//
+// The daily job failed three mornings running and opened no issue, uploaded no
+// artifact, and said nothing about why. The reason was structural rather than
+// incidental: the script exited before writing claim-result.json, and the
+// workflow decides whether to report by reading that file. So the one class of
+// failure most likely to happen - a setup that was never completed - was the
+// one class that produced pure silence.
+//
+// The distinction being pinned here:
+//   never configured  -> skip quietly, exit 0. Opt-in, not broken.
+//   configured & bad  -> exit 1 AND leave something for the workflow to report.
+console.log('Setup failures are distinguishable, and never silent');
+{
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+
+  const TOOL = path.join(PATHS.root, 'tools', 'browser-claim.mjs');
+
+  const run = (browserState) => {
+    const cwd = mkdtempSync(path.join(tmpdir(), 'gv-claim-'));
+    const env = { ...process.env, GITHUB_STEP_SUMMARY: path.join(cwd, 'summary.md') };
+    delete env.BROWSER_STATE;
+    if (browserState !== undefined) env.BROWSER_STATE = browserState;
+
+    let code = 0;
+    try {
+      execFileSync(process.execPath, [TOOL], { cwd, env, stdio: 'pipe', timeout: 60000 });
+    } catch (e) {
+      code = e.status ?? 1;
+    }
+    const resultPath = path.join(cwd, 'claim-result.json');
+    return {
+      code,
+      result: existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, 'utf8')) : null,
+      summary: existsSync(env.GITHUB_STEP_SUMMARY)
+        ? readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8') : '',
+    };
+  };
+
+  const unset = run(undefined);
+  ok(unset.code === 0,
+     `an unconfigured optional feature is not a failure (exit ${unset.code})`);
+  ok(unset.result !== null,
+     'it still leaves a result file, so the workflow is never guessing');
+  ok(unset.result?.failures?.length === 0,
+     'with no failures, so no issue is opened and nobody is nagged daily');
+  ok(/browser-login/.test(unset.summary),
+     'and the run summary says exactly how to switch it on');
+
+  const broken = run('this is not json');
+  ok(broken.code === 1,
+     `a configured-but-broken session DOES fail (exit ${broken.code})`);
+  ok(broken.result?.failures?.length === 1,
+     'and writes a failure the workflow can turn into an issue');
+  ok(/BROWSER_STATE/.test(broken.result?.failures?.[0]?.error ?? ''),
+     'naming the thing that is wrong');
+  ok(/browser-login/.test(broken.result?.failures?.[0]?.error ?? ''),
+     'and how to fix it, since an issue with no remedy is just noise');
+}
+
+console.log('');
 if (fails) { console.log(`${fails} assertion(s) failed.`); process.exit(1); }
 console.log('All browser-claim tests passed.');

@@ -50,7 +50,7 @@ const NOT_FROM_CI = new Set([
   'GAMEVAULT_PASSWORD', 'GAMEVAULT_PASSWORD_HASH',
   'PORT', 'HOST', 'TRUST_PROXY', 'NODE_ENV',
   // Set by the Actions runner itself; wiring it would be redundant.
-  'GITHUB_ACTIONS',
+  'GITHUB_ACTIONS', 'GITHUB_STEP_SUMMARY',
 ]);
 
 console.log('Every configurable the build reads is passed by the workflow');

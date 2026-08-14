@@ -10,23 +10,62 @@
  *   node tools/browser-claim.mjs prime      # one store
  */
 import { argv, env } from 'node:process';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, appendFileSync } from 'node:fs';
 import { STORES, claimStore } from '../lib/browser-claim.mjs';
 
 const wanted = argv.slice(2).filter((a) => !a.startsWith('--') && STORES[a]);
 const stores = wanted.length ? wanted : Object.keys(STORES);
 
+const summary = (md) => {
+  if (env.GITHUB_STEP_SUMMARY) {
+    try { appendFileSync(env.GITHUB_STEP_SUMMARY, `${md}\n`); } catch { /* not fatal */ }
+  }
+};
+
+/**
+ * Record why the run could not proceed, then exit.
+ *
+ * The workflow decides whether to open an issue by reading claim-result.json,
+ * so bailing out before writing it made setup failures completely silent: a
+ * red X every morning, no issue, no artifact, nothing saying what was wrong.
+ * Setup failure is the MOST likely kind for this job, so it is the last thing
+ * that should have been missing from the report.
+ */
+function bail(label, error, { fatal = true } = {}) {
+  writeFileSync('claim-result.json', JSON.stringify({
+    at: new Date().toISOString(),
+    claimed: [],
+    failures: fatal ? [{ store: 'setup', label, error }] : [],
+  }, null, 2), 'utf8');
+  if (fatal) console.error(error);
+  process.exit(fatal ? 1 : 0);
+}
+
+// Not configured is not the same as broken.
+//
+// Browser claiming is opt-in: it needs a sign-in performed on a real PC. A
+// daily scheduled job that fails forever because an optional feature was never
+// switched on is indistinguishable from one that fails because a working setup
+// just broke - and after a week of red crosses, nobody looks at either. Skip
+// cleanly instead, and say so where it will be found.
 if (!env.BROWSER_STATE) {
-  console.error('BROWSER_STATE is not set. Run "npm run browser-login" on a PC first.');
-  process.exit(1);
+  summary('### Browser claiming is not set up\n\n' +
+          'Skipped: no `BROWSER_STATE` secret. To switch it on, run this on a PC:\n\n' +
+          '```\nnpm run browser-login\ngh secret set BROWSER_STATE --repo ' +
+          `${env.GITHUB_REPOSITORY ?? '<owner>/<repo>'}\n\`\`\`\n\n` +
+          'Epic and GOG claiming in the six-hourly snapshot build are unaffected.');
+  console.log('BROWSER_STATE is not set, so browser claiming is skipped.');
+  console.log('To enable it: npm run browser-login, then set the BROWSER_STATE secret.');
+  bail('Prime Gaming', 'not configured', { fatal: false });
 }
 
 let state;
 try {
   state = JSON.parse(env.BROWSER_STATE);
 } catch (e) {
-  console.error(`BROWSER_STATE is not valid JSON (${e.message}).`);
-  process.exit(1);
+  // Configured but unusable IS broken, and must be loud: someone set this
+  // deliberately and is expecting it to work.
+  bail('Browser session', `BROWSER_STATE is not valid JSON (${e.message}). Re-run "npm run browser-login".`);
 }
 
 const { chromium } = await import('playwright');
