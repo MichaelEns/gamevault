@@ -242,7 +242,27 @@ jobs:
               process.stdout.write(String(m.claimFailures||0));
             }catch{process.stdout.write('0')}
           ")
-          [ "$FAILURES" = "0" ] && { echo "No claim failures."; exit 0; }
+
+          # Resolved is as important to report as broken.
+          #
+          # Claiming by hand fixes the problem but leaves the issue open, so
+          # the notification outlived the fault and had to be tidied up
+          # manually. An issue describing something that is no longer true is
+          # the same cry-wolf failure as one that reopens daily: it teaches
+          # you that these can be ignored. Close it when the claims arrive.
+          if [ "$FAILURES" = "0" ]; then
+            OPEN=$(gh issue list --state open --label claim-failure --json number --jq '.[].number')
+            if [ -n "$OPEN" ]; then
+              for N in $OPEN; do
+                gh issue close "$N" --comment \
+                  "Resolved: the outstanding claims are now present in your library, confirmed by the build at $(date -u '+%Y-%m-%d %H:%M UTC'). Closed automatically." || true
+                echo "Closed resolved claim-failure issue #${N}."
+              done
+            else
+              echo "No claim failures."
+            fi
+            exit 0
+          fi
 
           EXISTING=$(gh issue list --state open --label claim-failure --json number --jq 'length')
           if [ "$EXISTING" != "0" ]; then
