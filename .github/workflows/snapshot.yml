@@ -26,9 +26,10 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  # For the claim-failure notification: an issue opened by the Actions bot is
-  # what emails the repository owner, and needs no SMTP credentials.
-  issues: write
+  # Deliberately no `issues: write`. This workflow used to open an issue to
+  # report a failed claim; it now reports by email instead (see "Report claim
+  # failures"), and a workflow that cannot write issues cannot start doing it
+  # again by accident.
 
 # Never let two builds publish at once.
 concurrency:
@@ -225,64 +226,37 @@ jobs:
           echo "Service worker stamped as ${BUILD_ID}."
 
       - name: Report claim failures
-        # The email half of "tell me when it breaks". An issue opened by the
-        # Actions bot notifies the repository owner by email, which needs no
-        # SMTP credentials and no third-party service.
+        # Claim failures are reported by EMAIL, from the machine that runs the
+        # GitHub Alert Mail task, which polls the snapshot-meta.json published
+        # below and sends through a local Outlook chokepoint.
         #
-        # Rate-limited to one open issue: reopening or re-notifying every six
-        # hours would train the user to ignore it, which defeats the purpose.
+        # This used to open an issue on this repository, on the reasoning that
+        # an issue opened by the Actions bot emails the owner for free. It does
+        # not. Notifications go only to people *watching* the repository, and
+        # this one had no watchers at all, so issue #2 sat unread from 20 to 30
+        # August while the six-hourly build kept finding the same failure and
+        # kept deciding not to open a second issue. The mechanism worked
+        # perfectly and reached nobody, which is the worst possible combination:
+        # it looks like an all-clear.
+        #
+        # Nothing here notifies, so no `issues:` permission is needed and this
+        # step cannot fail the build. It exists to put the failure in the run
+        # log, where it is visible when reading a build by hand.
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FAILURES=$(node -e "
+          node -e "
             const fs=require('fs');
-            try{
-              const m=JSON.parse(fs.readFileSync('site/snapshot-meta.json','utf8'));
-              process.stdout.write(String(m.claimFailures||0));
-            }catch{process.stdout.write('0')}
-          ")
-
-          # Resolved is as important to report as broken.
-          #
-          # Claiming by hand fixes the problem but leaves the issue open, so
-          # the notification outlived the fault and had to be tidied up
-          # manually. An issue describing something that is no longer true is
-          # the same cry-wolf failure as one that reopens daily: it teaches
-          # you that these can be ignored. Close it when the claims arrive.
-          if [ "$FAILURES" = "0" ]; then
-            OPEN=$(gh issue list --state open --label claim-failure --json number --jq '.[].number')
-            if [ -n "$OPEN" ]; then
-              for N in $OPEN; do
-                gh issue close "$N" --comment \
-                  "Resolved: the outstanding claims are now present in your library, confirmed by the build at $(date -u '+%Y-%m-%d %H:%M UTC'). Closed automatically." || true
-                echo "Closed resolved claim-failure issue #${N}."
-              done
-            else
-              echo "No claim failures."
-            fi
-            exit 0
-          fi
-
-          EXISTING=$(gh issue list --state open --label claim-failure --json number --jq 'length')
-          if [ "$EXISTING" != "0" ]; then
-            echo "A claim-failure issue is already open; not opening another."
-            exit 0
-          fi
-
-          gh label create claim-failure --color d73a4a \
-            --description "An automatic game claim did not arrive" 2>/dev/null || true
-          gh issue create \
-            --title "GameVault: $FAILURES automatic claim(s) did not arrive" \
-            --label claim-failure \
-            --body "The scheduled build claimed one or more free games, but they did not appear in your library on a later sync.
-
-          A claim that Epic accepts can still fail to deliver, so success is judged by the game turning up in the library rather than by the HTTP response.
-
-          Open the app to see which ones and claim them by hand:
-          https://michaelens.github.io/gamevault/
-
-          This issue will not be reopened while it stays open, so the six-hourly build will not keep mailing you. Close it once the games are claimed."
+            let m={};
+            try{ m=JSON.parse(fs.readFileSync('site/snapshot-meta.json','utf8')); }catch{}
+            const n=m.claimFailures||0;
+            const alerts=m.claimAlerts||[];
+            if(!n){ console.log('No claim failures.'); process.exit(0); }
+            console.log(\`::warning::\${n} claim(s) did not arrive - emailed separately.\`);
+            for(const a of alerts) console.log(\`  \${a.store}: \${a.kind}\${a.givenUp?' (no longer retried)':''}\`);
+            if(alerts.some((a)=>a.kind==='auth')){
+              console.log('::warning::A stored credential has expired. Every future claim for that store will fail until it is refreshed.');
+            }
+          "
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

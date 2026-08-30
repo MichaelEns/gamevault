@@ -467,8 +467,14 @@ async function main() {
     encrypted: Boolean(passphrase),
     counts: snapshot.counts,
     // A count only - the titles are ownership data and belong inside the
-    // encrypted payload, but the workflow needs to know whether to notify.
+    // encrypted payload, but the notifier needs to know whether to notify.
     claimFailures: (snapshot.claimFailures ?? []).length,
+    // ...and a title-free description of each one, so the notifier can tell a
+    // dead credential (which breaks every future claim) apart from one game
+    // being sold out, and can tell "still the same problem" apart from "a new
+    // problem" when the count happens not to move. See claims.publicAlerts.
+    claimAlerts: claimsMod.publicAlerts(snapshot.claimFailures ?? [],
+                                        { secret: passphrase ?? '' }),
   }), 'utf8');
 
   const kb = (JSON.stringify(payload).length / 1024).toFixed(1);

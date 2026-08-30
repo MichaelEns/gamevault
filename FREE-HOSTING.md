@@ -145,9 +145,14 @@ your phone run identical code. Using `node:crypto` would have meant two
 implementations that could silently drift, and the failure mode is "your
 snapshot is permanently unreadable".
 
-`snapshot-meta.json` is deliberately **not** encrypted. It holds only the
-build time and three counts, so the app can show freshness before you
-unlock. Verified to leak no titles.
+`snapshot-meta.json` is deliberately **not** encrypted. It holds the build
+time, three counts, and a title-free description of any failed claim (an
+opaque id, the store name, and one of four fixed words for what went wrong)
+so the notifier can tell an expired credential apart from a sold-out game.
+The id is an HMAC keyed on the passphrase, so it is stable across builds but
+cannot be matched against a hashed list of known free-game titles. Verified
+to leak no titles — `test/claims.test.mjs` pins both the absence of titles
+and the exact set of published fields.
 
 The workflow **hard-fails** if `SNAPSHOT_PASSPHRASE` is unset, rather than
 quietly publishing your library in the clear.

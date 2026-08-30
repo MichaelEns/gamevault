@@ -11,7 +11,7 @@
  *
  * Both directions are pinned here.
  */
-import { verifyClaims, nextLog, recordAttempt, reportable } from '../lib/claims.mjs';
+import { verifyClaims, nextLog, recordAttempt, reportable, classifyFailure, publicAlerts } from '../lib/claims.mjs';
 import { normalizeTitle } from '../lib/match.mjs';
 
 let fails = 0;
@@ -102,6 +102,51 @@ ok(surfaced.some((s) => s.title === 'rejected'), 'a rejected claim is reported')
 ok(surfaced.some((s) => s.title === 'absent'), 'a missing game is reported');
 ok(!surfaced.some((s) => s.title === 'ok'), 'a successful claim is not');
 ok(!surfaced.some((s) => s.title === 'ancient'), 'and a month-old failure stops nagging');
+
+console.log('\nA dead credential is distinguished from one game being refused');
+// This is the distinction that decides what the reader has to DO. An expired
+// cookie breaks every future claim and is fixed by re-authenticating; a
+// sold-out game is fixed by nothing at all.
+ok(classifyFailure({ ok: false, error: 'Epic rejected the session (401). EPIC_COOKIES has expired - sign in again.' }) === 'auth',
+   'an expired Epic session is "auth"');
+ok(classifyFailure({ ok: false, error: 'Humble rejected the session (401). The HUMBLE_SESSION cookie has expired' }) === 'auth',
+   'an expired Humble session is "auth"');
+ok(classifyFailure({ ok: false, error: 'Epic refused the order: SOLD_OUT' }) === 'rejected',
+   'a sold-out game is only "rejected"');
+ok(classifyFailure({ failedAt: ago(1), reason: 'the claim appeared to succeed, but the game never arrived in your library' }) === 'missing',
+   'accepted-then-absent is "missing"');
+
+console.log('\nThe published alert form leaks no titles');
+// snapshot-meta.json is served UNENCRYPTED so the app can show freshness
+// before unlocking, so anything added to it is world-readable. A title
+// reaching this structure would put part of the library in the clear, which
+// is the one outcome the whole encrypted-snapshot design exists to prevent.
+const secretLog = [
+  { title: 'Epic Mage Bundle', norm: 'epic mage bundle', store: 'epic', ok: false,
+    error: 'Epic rejected the session (401). EPIC_COOKIES has expired - sign in again.' },
+  { title: 'Hades', norm: 'hades', store: 'gog', failedAt: ago(1), giveUp: true },
+];
+const published = publicAlerts(secretLog, { secret: 'pass', now: NOW });
+const asText = JSON.stringify(published);
+ok(!/epic mage bundle|hades/i.test(asText), `no title appears in ${asText}`);
+ok(published.every((a) => Object.keys(a).sort().join() === 'givenUp,id,kind,store'),
+   'and no unexpected field can smuggle one in');
+ok(published[0].kind === 'auth' && published[0].store === 'epic',
+   'the actionable part survives: epic / auth');
+ok(published[1].givenUp === true, 'and "no longer being retried" is carried through');
+
+console.log('\nAlert ids are stable, distinct, and keyed');
+// Stable: an id that changed every build would make one unfixed problem look
+// like a new problem every six hours. Distinct: without per-failure identity,
+// one failure resolving as another appears leaves the count unchanged and a
+// counter-watcher silent through a brand-new failure.
+const again = publicAlerts(secretLog, { secret: 'pass', now: NOW + HOUR });
+ok(again[0].id === published[0].id, 'the same failure keeps its id across builds');
+ok(published[0].id !== published[1].id, 'different failures get different ids');
+const otherKey = publicAlerts(secretLog, { secret: 'different', now: NOW });
+ok(otherKey[0].id !== published[0].id,
+   'the id is keyed on the passphrase, so a public title list cannot be hashed to match it');
+ok(/^[0-9a-f]{12}$/.test(published[0].id), `and is opaque (${published[0].id})`);
 
 console.log('');
 if (fails) { console.log(`${fails} assertion(s) failed.`); process.exit(1); }
