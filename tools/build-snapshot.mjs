@@ -302,12 +302,14 @@ async function main() {
   if (claimable.length) {
     console.log('');
     console.log('4e. Claiming free games');
-    // Never re-attempt something already tracked, or a failed claim would be
-    // retried on every single build.
-    const tracked = new Set(previousLog.filter((e) => !e.giveUp).map((e) => e.norm));
+    // Only re-attempt something the log says is still worth retrying: never
+    // a claim still inside its grace window, and never one already given up
+    // on. Getting this backwards either claims nothing ever again, or claims
+    // on every build forever.
+    const mayClaim = claimsMod.claimFilter(previousLog);
 
     for (const [store, mod] of Object.entries(claimers)) {
-      const todo = claimable.filter((f) => f.store === store && !tracked.has(f.norm));
+      const todo = claimable.filter((f) => f.store === store && mayClaim(f));
       if (!todo.length) continue;
       if (!mod.configured(ENV)) {
         log(`${todo.length} free on ${store}, but it is not set up for claiming`);

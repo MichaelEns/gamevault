@@ -11,7 +11,7 @@
  *
  * Both directions are pinned here.
  */
-import { verifyClaims, nextLog, recordAttempt, reportable, classifyFailure, publicAlerts } from '../lib/claims.mjs';
+import { verifyClaims, nextLog, recordAttempt, reportable, classifyFailure, publicAlerts, claimFilter, retryable } from '../lib/claims.mjs';
 import { normalizeTitle } from '../lib/match.mjs';
 
 let fails = 0;
@@ -147,6 +147,85 @@ const otherKey = publicAlerts(secretLog, { secret: 'different', now: NOW });
 ok(otherKey[0].id !== published[0].id,
    'the id is keyed on the passphrase, so a public title list cannot be hashed to match it');
 ok(/^[0-9a-f]{12}$/.test(published[0].id), `and is opaque (${published[0].id})`);
+
+console.log('\nA failure is actually retried, and the retry loop terminates');
+// This is the pair of bugs that made a stuck claim permanent: the skip set was
+// inverted (it skipped everything NOT given up, so nothing was ever retried),
+// and a retry appended a second entry whose count restarted at 1. Simulated
+// over many builds because both faults are only visible over time - a single
+// call to either function looks perfectly correct.
+{
+  const HOURS_PER_BUILD = 6;
+  const free = { title: 'Stuck Game', norm: 'stuck game', store: 'epic' };
+  let log = [];
+  let sent = 0;
+  let clock = NOW;
+
+  // 20 days, so the run crosses the point where the alert should age out.
+  for (let build = 0; build < 80; build++) {
+    clock += HOURS_PER_BUILD * HOUR;
+    // The game is never in the library, so the claim never verifies.
+    const o = verifyClaims(log, {}, clock);
+    const attempts = [];
+    if (claimFilter(log)(free)) {
+      sent++;
+      attempts.push({ ...recordAttempt(free, { ok: false, error: 'Epic rejected the session (401)' }),
+                      attemptedAt: new Date(clock).toISOString() });
+    }
+    log = nextLog({ pending: o.pending, failed: o.failed, attempts });
+  }
+
+  ok(sent === 3, `exactly MAX_ATTEMPTS requests were sent over 80 builds, not 1 and not 80 (sent ${sent})`);
+  ok(log.length === 1, `and the log holds one entry for it, not one per retry (${log.length})`);
+  ok(log[0].giveUp === true, 'the surviving entry is marked given up');
+  ok(reportable(log, clock).length === 0,
+     'and once stale it stops being reported, so the alert can finally clear');
+  // The tombstone has to survive, or the game becomes claimable all over again.
+  ok(!claimFilter(log)(free), 'while still blocking any further attempt');
+}
+
+console.log('\nLooking at a failure again does not reset its age');
+// failedAt used to be re-stamped on every build, so it always read "now". That
+// silently defeated every age-based rule: the alert could never grow old
+// enough to stop being reported, no matter how long it had really been there.
+{
+  const first = verifyClaims(
+    [{ title: 'Y', norm: 'y', store: 'epic', attemptedAt: ago(30), ok: true, attempts: 1 }],
+    {}, NOW,
+  ).failed[0];
+  const later = verifyClaims([first], {}, NOW + 10 * 24 * HOUR).failed[0];
+  ok(later.failedAt === first.failedAt,
+     `failedAt survives ten more days of builds unchanged (${later.failedAt})`);
+  ok(reportable([later], NOW + 20 * 24 * HOUR).length === 0,
+     'so it does eventually age out of the alerts');
+}
+
+console.log('\nA claim inside its grace window is never re-sent');
+// Re-sending here would double-claim a request that may still succeed.
+ok(!claimFilter([{ store: 'epic', norm: 'tunic', attemptedAt: ago(1), ok: true, attempts: 1 }])
+    ({ store: 'epic', norm: 'tunic' }),
+   'a pending claim blocks a second attempt');
+ok(!claimFilter([{ store: 'epic', norm: 'x', failedAt: ago(1), attempts: 3, giveUp: true }])
+    ({ store: 'epic', norm: 'x' }),
+   'a given-up claim is not retried');
+ok(claimFilter([{ store: 'epic', norm: 'x', failedAt: ago(1), attempts: 1 }])
+    ({ store: 'epic', norm: 'x' }),
+   'but a failure with attempts left IS retried');
+
+console.log('\nA failure on one store does not suppress the same game on another');
+// The skip set used to be keyed on title alone, so a dead Epic session would
+// silently stop the same giveaway being claimed on GOG, where nothing is wrong.
+ok(claimFilter([{ store: 'epic', norm: 'hades', failedAt: ago(1), attempts: 3, giveUp: true }])
+    ({ store: 'gog', norm: 'hades' }),
+   'the GOG copy is still claimable');
+
+console.log('\nAn outright rejection stops nagging eventually');
+// It used to return early, before the age check, so it was reported forever.
+const staleReject = [{ title: 'old', store: 'epic', norm: 'old', ok: false, error: 'refused',
+                       attemptedAt: ago(24 * 30), failedAt: ago(24 * 30) }];
+ok(reportable(staleReject, NOW).length === 0, 'a month-old rejection is no longer reported');
+ok(reportable([{ ...staleReject[0], attemptedAt: ago(2), failedAt: ago(2) }], NOW).length === 1,
+   'but a fresh one still is');
 
 console.log('');
 if (fails) { console.log(`${fails} assertion(s) failed.`); process.exit(1); }
