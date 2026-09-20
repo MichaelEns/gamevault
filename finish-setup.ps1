@@ -272,12 +272,22 @@ function Set-Secret {
     # HTTP header with a stray CR makes undici reject the request before it is
     # sent, which surfaced once as an unexplained "fetch failed".
     $Value = $Value.Trim()
+    $bytes = [Text.Encoding]::UTF8.GetByteCount($Value)
+    if ($bytes -gt 48KB) {
+        Bad "$Name is $bytes bytes; GitHub secrets are limited to 49,152 bytes."
+        Info 'Only credential files should be archived; cached catalogues do not belong in a secret.'
+        return $false
+    }
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $Value | gh secret set $Name --repo $Repo 2>&1 | Out-Null
+        $ghOutput = @($Value | gh secret set $Name --repo $Repo 2>&1)
         if ($LASTEXITCODE -eq 0) { Good "$Name saved to GitHub"; return $true }
-        Bad "$Name could not be saved (gh exit $LASTEXITCODE)"
+        $detail = (($ghOutput | ForEach-Object { $_.ToString().Trim() }) |
+                   Where-Object { $_ }) -join ' '
+        $detail = $detail -replace '(?i)((?:authorization|password|token)\s*[:=]\s*)\S+', '$1[redacted]'
+        if ($detail.Length -gt 500) { $detail = $detail.Substring(0, 500) + '...' }
+        Bad "$Name could not be saved (gh exit $LASTEXITCODE)$(if ($detail) { ": $detail" })"
         return $false
     } finally { $ErrorActionPreference = $prev }
 }
@@ -297,16 +307,10 @@ function Save-AuthResult {
 # Store clients write their token to different places depending on version and
 # platform, so look rather than assume - a missing config is otherwise reported
 # as "sign-in did not complete" when in fact it did.
-# Store clients do not keep a single, stably-named credential file.
-#
-# nile migrated user.json to user.enc (AES, with the key derived from the
-# Amazon account id held in a separate plaintext file), so copying one file
-# captures either the ciphertext or the key but never both. legendary spreads
-# state across several files too, and both use platformdirs, whose layout
-# varies by platform and version.
-#
-# Archiving the whole configuration directory sidesteps all of that: whatever
-# the client wrote, in whatever files, comes along.
+# Store clients keep credentials in different places and shapes. Ask each client
+# where its directory lives, then let Get-ConfigArchive select only its actual
+# credential files. Cached catalogues are both unnecessary and too large for a
+# GitHub secret.
 function Get-ClientConfigDir {
     param([string] $Client)
 
@@ -339,19 +343,35 @@ function Get-ClientConfigDir {
     return $null
 }
 
-# Packs a client's configuration directory into one base64 blob for a secret.
+# Packs only a client's credential files into one base64 blob for a secret.
 function Get-ConfigArchive {
-    param([string] $Dir)
+    param(
+        [string] $Dir,
+        [ValidateSet('legendary', 'nile')][string] $Client
+    )
     $zip = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-cfg-" + [guid]::NewGuid().ToString('N') + '.zip')
+    $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-stage-" + [guid]::NewGuid().ToString('N'))
     try {
-        # Exclude bulk that is not credentials: nile ships ~3MB of SDK DLLs and
-        # legendary caches manifests, neither of which belongs in a secret.
-        $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("gv-stage-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $staging -Force | Out-Null
-        Get-ChildItem $Dir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Length -lt 512KB } |
-            ForEach-Object { Copy-Item $_.FullName $staging -Force -ErrorAction SilentlyContinue }
-        if (-not (Get-ChildItem $staging -File)) { return $null }
+
+        if ($Client -eq 'legendary') {
+            # Assets, aliases and entitlements are regenerable caches. Including
+            # them made the base64 ZIP 135 KB, almost three times GitHub's limit.
+            $files = @(Get-Item (Join-Path $Dir 'user.json') -ErrorAction SilentlyContinue)
+        } else {
+            # nile encrypts the login in <account>.enc using the account id in
+            # current_user.json, so both halves are required.
+            $currentUser = Get-Item (Join-Path $Dir 'current_user.json') -ErrorAction SilentlyContinue
+            $encrypted = @(Get-ChildItem $Dir -File -Filter '*.enc' -ErrorAction SilentlyContinue)
+            if (-not $currentUser -or -not $encrypted.Count) {
+                Warn 'nile credentials are incomplete (need current_user.json and an account .enc file).'
+                return $null
+            }
+            $files = @($currentUser) + $encrypted
+        }
+
+        if (-not $files.Count) { return $null }
+        $files | ForEach-Object { Copy-Item $_.FullName $staging -Force }
         Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip -Force
         return [Convert]::ToBase64String([IO.File]::ReadAllBytes($zip))
     } finally {
@@ -419,9 +439,34 @@ if (& $want 'epic') {
             return
         }
         Info "Found legendary config at $dir"
-        $b64 = Get-ConfigArchive $dir
+        $b64 = Get-ConfigArchive $dir 'legendary'
         if (-not $b64) { Warn 'Nothing to archive.'; Record 'Epic' 'failed' 'empty config'; return }
-        if (Set-Secret 'LEGENDARY_CONFIG' $b64) { Record 'Epic' 'done' } else { Record 'Epic' 'failed' 'secret not saved' }
+        try {
+            $legendaryUser = Get-Content (Join-Path $dir 'user.json') -Raw | ConvertFrom-Json
+            $refreshToken = [string]$legendaryUser.refresh_token
+        } catch {
+            Bad "legendary's user.json could not be read: $($_.Exception.Message)"
+            Record 'Epic' 'failed' 'invalid user.json'
+            return
+        }
+        if (-not $refreshToken) {
+            Bad "legendary's user.json contains no refresh token."
+            Record 'Epic' 'failed' 'missing refresh token'
+            return
+        }
+
+        # Keep the overlay and its baseline in sync. Saving the fresh token
+        # first prevents an older EPIC_REFRESH_TOKEN secret from replacing a
+        # newly authenticated login on the next runner.
+        if (-not (Set-Secret 'EPIC_REFRESH_TOKEN' $refreshToken)) {
+            Record 'Epic' 'failed' 'refresh token not saved'
+            return
+        }
+        if (Set-Secret 'LEGENDARY_CONFIG' $b64) {
+            Record 'Epic' 'done'
+        } else {
+            Record 'Epic' 'failed' 'config secret not saved'
+        }
     }
 }
 
@@ -465,7 +510,7 @@ if (& $want 'amazon') {
             return
         }
         Info "Found nile config at $dir"
-        $b64 = Get-ConfigArchive $dir
+        $b64 = Get-ConfigArchive $dir 'nile'
         if (-not $b64) { Warn 'Nothing to archive.'; Record 'Prime Gaming' 'failed' 'empty config'; return }
         if (Set-Secret 'NILE_CONFIG' $b64) { Record 'Prime Gaming' 'done' } else { Record 'Prime Gaming' 'failed' 'secret not saved' }
     }

@@ -73,6 +73,54 @@ Write-Host "`nCredentials are trimmed before being stored"
 Ok ($src -match '\$Value\s*=\s*\$Value\.Trim\(\)') `
    'Set-Secret trims (a stray CR makes undici reject the request outright)'
 
+Write-Host "`nGitHub secret failures stay actionable"
+Ok ($src -match 'GetByteCount\(\$Value\)' -and $src -match '\$bytes\s+-gt\s+48KB') `
+   'Set-Secret rejects values above GitHub''s 48 KB limit before upload'
+Ok ($src -notmatch 'gh secret set[^\r\n]*\|\s*Out-Null') `
+   'gh error output is not discarded'
+Ok ($src -match '\$ghOutput' -and $src -match '\$detail') `
+   'the GitHub CLI error is included in the failure message'
+Ok ($src -match "Set-Secret 'EPIC_REFRESH_TOKEN'") `
+   'a fresh Epic login also replaces the rotation overlay secret'
+
+# --- client archives contain credentials, not regenerable caches ------------
+Write-Host "`nClient archives contain only required credential files"
+$archiveFunction = $ast.FindAll({
+    param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $n.Name -eq 'Get-ConfigArchive'
+}, $true) | Select-Object -First 1
+Invoke-Expression $archiveFunction.Extent.Text
+
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("gv-setup-test-" + [guid]::NewGuid().ToString('N'))
+try {
+    $legendary = Join-Path $tmp 'legendary'
+    $nile = Join-Path $tmp 'nile'
+    New-Item -ItemType Directory -Path $legendary, $nile -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $legendary 'user.json'), '{"refresh_token":"credential"}')
+    [IO.File]::WriteAllText((Join-Path $legendary 'assets.json'), '{"cache":"large"}')
+    [IO.File]::WriteAllText((Join-Path $legendary 'aliases.json'), '{"cache":"large"}')
+    [IO.File]::WriteAllText((Join-Path $nile 'current_user.json'), '{"id":"account"}')
+    [IO.File]::WriteAllText((Join-Path $nile 'account.enc'), 'encrypted credential')
+    [IO.File]::WriteAllText((Join-Path $nile 'library.json'), '{"cache":"large"}')
+
+    foreach ($case in @(
+        @{ Client = 'legendary'; Dir = $legendary; Expected = @('user.json') },
+        @{ Client = 'nile'; Dir = $nile; Expected = @('account.enc', 'current_user.json') }
+    )) {
+        $encoded = Get-ConfigArchive $case.Dir $case.Client
+        $zip = Join-Path $tmp "$($case.Client).zip"
+        $out = Join-Path $tmp "$($case.Client)-out"
+        [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($encoded))
+        Expand-Archive -Path $zip -DestinationPath $out
+        $actual = @((Get-ChildItem $out -File).Name | Sort-Object)
+        Ok (($actual -join ',') -eq ($case.Expected -join ',')) `
+           "$($case.Client) archive contains exactly $($case.Expected -join ', ')"
+    }
+} finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host ''
 if ($fails) { Write-Host "$fails assertion(s) failed."; exit 1 }
 Write-Host 'All finish-setup checks passed.'

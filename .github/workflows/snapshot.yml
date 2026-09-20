@@ -74,13 +74,12 @@ jobs:
       - name: Restore game-client tokens
         env:
           LEGENDARY_CONFIG: ${{ secrets.LEGENDARY_CONFIG }}
+          EPIC_REFRESH_TOKEN: ${{ secrets.EPIC_REFRESH_TOKEN }}
           NILE_CONFIG: ${{ secrets.NILE_CONFIG }}
         run: |
-          # Both secrets are now a base64 ZIP of the client's whole config
-          # directory, not a single file. nile in particular keeps its
-          # credentials in user.enc (AES) with the key derived from an account
-          # id held in a SEPARATE plaintext file, so any single-file copy
-          # captures the ciphertext or the key but never both.
+          # Both secrets are base64 ZIPs containing only credential state.
+          # legendary needs user.json. nile needs current_user.json plus the
+          # account-specific .enc file; its caches do not belong in a secret.
           restore() {
             local blob="$1" dest="$2" name="$3"
             [ -z "$blob" ] && return 0
@@ -100,6 +99,18 @@ jobs:
 
           if [ -n "$LEGENDARY_CONFIG" ]; then
             restore "$LEGENDARY_CONFIG" "$HOME/.config/legendary" legendary
+            # The archive is the setup-time baseline. Overlay the latest token
+            # that a previous runner saved after legendary rotated it.
+            if [ -n "$EPIC_REFRESH_TOKEN" ] && [ -f "$HOME/.config/legendary/user.json" ]; then
+              node -e "
+                const fs = require('fs');
+                const p = process.env.HOME + '/.config/legendary/user.json';
+                const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+                data.refresh_token = process.env.EPIC_REFRESH_TOKEN.trim();
+                fs.writeFileSync(p, JSON.stringify(data, null, 2));
+              "
+              echo "Latest Epic refresh token applied."
+            fi
             if pip install --user legendary-gl; then
               echo "GAMEVAULT_LEGENDARY_BIN=$HOME/.local/bin/legendary" >> "$GITHUB_ENV"
             else
@@ -144,22 +155,13 @@ jobs:
           # Humble. Worth having even though most keys are Steam keys: an
           # UNREDEEMED key is a game you own that appears in no library at all.
           HUMBLE_SESSION: ${{ secrets.HUMBLE_SESSION }}
-          # Epic session cookies, for claiming the weekly free games. Only the
-          # payment host is involved and it is auth-gated rather than
-          # bot-protected, so no browser impersonation is needed.
-          EPIC_COOKIES: ${{ secrets.EPIC_COOKIES }}
           # GOG giveaways. Rotates its refresh token on every use, so it needs
           # GAMEVAULT_SECRETS_TOKEN to keep working past one build.
           GOG_REFRESH_TOKEN: ${{ secrets.GOG_REFRESH_TOKEN }}
-          # Epic rotates its launcher refresh token; kept separately so the
-          # whole LEGENDARY_CONFIG archive does not have to be rewritten.
+          # legendary rotates this while reading the Epic library. The build
+          # saves the replacement immediately and the restore step overlays it
+          # onto the setup-time LEGENDARY_CONFIG archive.
           EPIC_REFRESH_TOKEN: ${{ secrets.EPIC_REFRESH_TOKEN }}
-          # Two optional overrides for the same session. LEGENDARY_USER_JSON
-          # takes the token straight from a user.json when the ZIP archive is
-          # inconvenient; EPIC_ACCESS_TOKEN short-circuits the refresh entirely
-          # and is mainly useful for reproducing a failure by hand.
-          LEGENDARY_USER_JSON: ${{ secrets.LEGENDARY_USER_JSON }}
-          EPIC_ACCESS_TOKEN: ${{ secrets.EPIC_ACCESS_TOKEN }}
           # Used to fetch the previous snapshot, so the claim log survives
           # between builds and last week's claims can be verified.
           SITE_URL: ${{ vars.SITE_URL }}

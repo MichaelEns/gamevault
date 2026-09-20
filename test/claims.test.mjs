@@ -1,8 +1,8 @@
 /**
  * Claim verification.
  *
- * This is the mechanism that makes automated claiming defensible, so its
- * failure modes matter more than most:
+ * This is the mechanism that makes unattended claims and browser-action
+ * reminders trustworthy, so its failure modes matter more than most:
  *
  *   - reporting success when a game never arrived would be the silent failure
  *     the whole design exists to prevent;
@@ -76,6 +76,8 @@ console.log('\nFailures are retried, but not forever');
 // the behaviour most likely to get an account noticed.
 let carried = nextLog({ pending: [], failed: [{ ...failed[0], attempts: 1 }], attempts: [] });
 ok(carried[0].attempts === 1 && !carried[0].giveUp, 'a first failure is kept for retry');
+ok(/^[0-9a-f]{24}$/.test(carried[0].alertId),
+   'a legacy claim receives a random opaque alert id when carried forward');
 carried = nextLog({ pending: [], failed: [{ ...failed[0], attempts: 3 }], attempts: [] });
 ok(carried[0].giveUp === true, 'after three attempts it stops being retried');
 
@@ -90,6 +92,15 @@ ok(okAttempt.norm === normalizeTitle('New Game'), 'normalised for later lookup')
 ok(okAttempt.ok === true && okAttempt.error === null, 'success recorded without an error');
 const badAttempt = recordAttempt({ title: 'Bad', store: 'epic' }, { ok: false, error: 'nope' });
 ok(badAttempt.ok === false && badAttempt.error === 'nope', 'failure keeps its message');
+const manualAttempt = recordAttempt(
+  { title: 'Browser Game', store: 'epic', endsAt: ago(-24) },
+  { ok: false, error: 'browser required', manual: true, giveUp: true },
+);
+ok(manualAttempt.manual === true && manualAttempt.giveUp === true,
+   'a browser action is marked so CI will not retry it');
+ok(Boolean(manualAttempt.endsAt), 'the giveaway deadline is retained');
+ok(/^[0-9a-f]{24}$/.test(manualAttempt.alertId),
+   'a new claim receives a random opaque alert id');
 
 console.log('\nOnly genuine problems are surfaced to the user');
 const surfaced = reportable([
@@ -115,6 +126,8 @@ ok(classifyFailure({ ok: false, error: 'Epic refused the order: SOLD_OUT' }) ===
    'a sold-out game is only "rejected"');
 ok(classifyFailure({ failedAt: ago(1), reason: 'the claim appeared to succeed, but the game never arrived in your library' }) === 'missing',
    'accepted-then-absent is "missing"');
+ok(classifyFailure({ ok: false, manual: true, error: 'browser required' }) === 'manual',
+   'a browser checkout is "manual"');
 
 console.log('\nThe published alert form leaks no titles');
 // snapshot-meta.json is served UNENCRYPTED so the app can show freshness
@@ -123,10 +136,15 @@ console.log('\nThe published alert form leaks no titles');
 // is the one outcome the whole encrypted-snapshot design exists to prevent.
 const secretLog = [
   { title: 'Epic Mage Bundle', norm: 'epic mage bundle', store: 'epic', ok: false,
-    error: 'Epic rejected the session (401). EPIC_COOKIES has expired - sign in again.' },
-  { title: 'Hades', norm: 'hades', store: 'gog', failedAt: ago(1), giveUp: true },
+    error: 'Epic rejected the session (401). EPIC_COOKIES has expired - sign in again.',
+    alertId: '00112233445566778899aabb' },
+  { title: 'Hades', norm: 'hades', store: 'gog', failedAt: ago(1), giveUp: true,
+    alertId: '112233445566778899aabbcc' },
+  { title: 'Browser Game', norm: 'browser game', store: 'epic', ok: false,
+    error: 'browser required', manual: true, giveUp: true,
+    alertId: '2233445566778899aabbccdd' },
 ];
-const published = publicAlerts(secretLog, { secret: 'pass', now: NOW });
+const published = publicAlerts(secretLog, { now: NOW });
 const asText = JSON.stringify(published);
 ok(!/epic mage bundle|hades/i.test(asText), `no title appears in ${asText}`);
 ok(published.every((a) => Object.keys(a).sort().join() === 'givenUp,id,kind,store'),
@@ -134,19 +152,20 @@ ok(published.every((a) => Object.keys(a).sort().join() === 'givenUp,id,kind,stor
 ok(published[0].kind === 'auth' && published[0].store === 'epic',
    'the actionable part survives: epic / auth');
 ok(published[1].givenUp === true, 'and "no longer being retried" is carried through');
+ok(published[2].kind === 'manual', 'browser actions retain their title-free kind');
 
-console.log('\nAlert ids are stable, distinct, and keyed');
+console.log('\nAlert ids are stable, distinct, and independent of the passphrase');
 // Stable: an id that changed every build would make one unfixed problem look
 // like a new problem every six hours. Distinct: without per-failure identity,
 // one failure resolving as another appears leaves the count unchanged and a
 // counter-watcher silent through a brand-new failure.
-const again = publicAlerts(secretLog, { secret: 'pass', now: NOW + HOUR });
+const again = publicAlerts(secretLog, { now: NOW + HOUR });
 ok(again[0].id === published[0].id, 'the same failure keeps its id across builds');
 ok(published[0].id !== published[1].id, 'different failures get different ids');
-const otherKey = publicAlerts(secretLog, { secret: 'different', now: NOW });
-ok(otherKey[0].id !== published[0].id,
-   'the id is keyed on the passphrase, so a public title list cannot be hashed to match it');
-ok(/^[0-9a-f]{12}$/.test(published[0].id), `and is opaque (${published[0].id})`);
+const copied = publicAlerts(secretLog.map((e) => ({ ...e })), { now: NOW });
+ok(copied[0].id === published[0].id,
+   'the persisted random id, rather than a recomputed title hash, is reused');
+ok(/^[0-9a-f]{24}$/.test(published[0].id), `and is opaque (${published[0].id})`);
 
 console.log('\nA failure is actually retried, and the retry loop terminates');
 // This is the pair of bugs that made a stuck claim permanent: the skip set was
@@ -226,6 +245,42 @@ const staleReject = [{ title: 'old', store: 'epic', norm: 'old', ok: false, erro
 ok(reportable(staleReject, NOW).length === 0, 'a month-old rejection is no longer reported');
 ok(reportable([{ ...staleReject[0], attemptedAt: ago(2), failedAt: ago(2) }], NOW).length === 1,
    'but a fresh one still is');
+
+console.log('\nBrowser actions alert once, never retry, and expire with the offer');
+{
+  const game = {
+    title: 'Browser Game',
+    norm: 'browser game',
+    store: 'epic',
+    url: 'https://example.invalid/game',
+    endsAt: new Date(NOW + 24 * HOUR).toISOString(),
+  };
+  const entry = {
+    ...recordAttempt(game, {
+      ok: false,
+      error: 'Epic requires browser checkout.',
+      manual: true,
+      giveUp: true,
+    }),
+    attemptedAt: new Date(NOW).toISOString(),
+  };
+  const active = verifyClaims([entry], {}, NOW);
+  ok(active.failed.length === 1, 'the browser action is immediately reportable');
+  ok(active.failed[0].reason === 'Epic requires browser checkout.',
+     'it is not mislabeled as a rejected automatic claim');
+  ok(!claimFilter([entry])(game), 'CI never retries a browser-only checkout');
+  const longOffer = {
+    ...entry,
+    attemptedAt: ago(24 * 15),
+    failedAt: ago(24 * 15),
+    endsAt: new Date(NOW + 15 * 24 * HOUR).toISOString(),
+  };
+  ok(reportable([longOffer], NOW).length === 1,
+     'an active browser action does not disappear at the generic 14-day cutoff');
+  const expired = verifyClaims([entry], {}, NOW + 25 * HOUR);
+  ok(expired.failed.length === 0 && expired.pending.length === 0,
+     'the reminder is dropped when the giveaway ends');
+}
 
 console.log('');
 if (fails) { console.log(`${fails} assertion(s) failed.`); process.exit(1); }

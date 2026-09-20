@@ -49,6 +49,8 @@ for (const dir of ['lib', 'tools']) {
 const NOT_FROM_CI = new Set([
   'GAMEVAULT_DATA_DIR', 'GAMEVAULT_LEGENDARY_BIN', 'GAMEVAULT_NILE_BIN',
   'GAMEVAULT_PASSWORD', 'GAMEVAULT_PASSWORD_HASH',
+  // Local-only overrides used by the Epic login probe, not by the CI build.
+  'EPIC_ACCESS_TOKEN', 'LEGENDARY_USER_JSON',
   'PORT', 'HOST', 'TRUST_PROXY', 'NODE_ENV',
   // Set by the Actions runner itself; wiring it would be redundant.
   'GITHUB_ACTIONS',
@@ -86,7 +88,8 @@ console.log('\nSecrets are referenced as secrets, and variables as variables');
 // A key placed in `vars` would be readable by anyone able to read the repo.
 for (const secret of ['SNAPSHOT_PASSPHRASE', 'ITAD_API_KEY', 'STEAM_API_KEY',
                       'STEAM_ID', 'ITCH_API_KEY', 'UBISOFT_EMAIL',
-                      'UBISOFT_PASSWORD', 'LEGENDARY_CONFIG', 'NILE_CONFIG']) {
+                      'UBISOFT_PASSWORD', 'LEGENDARY_CONFIG', 'EPIC_REFRESH_TOKEN',
+                      'NILE_CONFIG']) {
   const line = workflow.split('\n').find((l) => l.trim().startsWith(`${secret}:`));
   ok(Boolean(line) && line.includes('secrets.'),
      `${secret} comes from secrets.* ${line ? '' : '(MISSING)'}`);
@@ -95,12 +98,14 @@ for (const variable of ['SUBSCRIPTIONS', 'COUNTRY', 'SNAPSHOT_PRICE_LIMIT']) {
   const line = workflow.split('\n').find((l) => l.trim().startsWith(`${variable}:`));
   ok(Boolean(line) && line.includes('vars.'), `${variable} comes from vars.*`);
 }
+ok(workflow.includes('data.refresh_token = process.env.EPIC_REFRESH_TOKEN.trim()'),
+   'the latest Epic refresh token is overlaid before legendary runs');
 
 console.log('\nThe app offers every secret the build can actually use');
 const app = await readFile(path.join(PATHS.root, 'site', 'app-static.js'), 'utf8');
 for (const name of ['ITAD_API_KEY', 'STEAM_API_KEY', 'STEAM_ID', 'ITCH_API_KEY',
                     'LEGENDARY_CONFIG', 'NILE_CONFIG', 'UBISOFT_EMAIL', 'UBISOFT_PASSWORD',
-                    'UBISOFT_REMEMBER_TICKET', 'EA_REMID', 'HUMBLE_SESSION', 'EPIC_COOKIES', 'MANUAL_LIBRARY']) {
+                    'UBISOFT_REMEMBER_TICKET', 'EA_REMID', 'HUMBLE_SESSION', 'MANUAL_LIBRARY']) {
   ok(app.includes(name), `"Add key" offers ${name}`);
 }
 

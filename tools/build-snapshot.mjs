@@ -323,8 +323,16 @@ async function main() {
         } catch (e) {
           // Already owned is not a failure and must not be recorded as one.
           if (e.alreadyOwned) { log(`${game.title} (${store}) - already owned`); continue; }
-          log(`${game.title} (${store}) - FAILED: ${e.message}`);
-          attempts.push(claimsMod.recordAttempt(game, { ok: false, error: e.message }));
+          const manual = e.manualAction === true;
+          log(`${game.title} (${store}) - ${manual ? 'BROWSER ACTION REQUIRED' : 'FAILED'}: ${e.message}`);
+          attempts.push(claimsMod.recordAttempt(game, {
+            ok: false,
+            error: e.message,
+            // A browser-only checkout is not retried from CI. One reminder is
+            // carried until ownership appears or the giveaway ends.
+            manual,
+            giveUp: manual,
+          }));
         }
         // Paced deliberately: there is no throughput to gain from bursts, and
         // a burst of purchase requests is the pattern worth avoiding.
@@ -475,8 +483,7 @@ async function main() {
     // dead credential (which breaks every future claim) apart from one game
     // being sold out, and can tell "still the same problem" apart from "a new
     // problem" when the count happens not to move. See claims.publicAlerts.
-    claimAlerts: claimsMod.publicAlerts(snapshot.claimFailures ?? [],
-                                        { secret: passphrase ?? '' }),
+    claimAlerts: claimsMod.publicAlerts(snapshot.claimFailures ?? []),
   }), 'utf8');
 
   const kb = (JSON.stringify(payload).length / 1024).toFixed(1);

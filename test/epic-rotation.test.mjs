@@ -63,10 +63,18 @@ globalThis.fetch = async (url, opts = {}) => {
   if (String(url).includes('/account/api/oauth/exchange')) {
     return { ok: true, status: 200, json: async () => ({ code: 'EXCHANGE-CODE' }) };
   }
-  if (String(url).includes('/id/api/exchange/code')) {
-    return { ok: true, status: 200,
-             headers: { getSetCookie: () => ['EPIC_SESSION_AP=abc; Path=/'] },
-             json: async () => ({}) };
+  if (String(url).includes('/actions/secrets/public-key')) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        key: Buffer.alloc(32).toString('base64'),
+        key_id: 'TEST-KEY',
+      }),
+    };
+  }
+  if (String(url).includes('/actions/secrets/EPIC_REFRESH_TOKEN')) {
+    return { ok: true, status: 204, json: async () => ({}) };
   }
   throw new Error(`unexpected fetch: ${url}`);
 };
@@ -97,6 +105,56 @@ ok(after.refresh_expires_at === '2031-01-01T00:00:00.000Z',
    'the new refresh expiry is recorded');
 ok(epic.rotatedRefreshToken === 'NEW-REFRESH',
    'the rotation is still reported for the CI write-back path');
+
+const ciEnv = {
+  GITHUB_ACTIONS: 'true',
+  GAMEVAULT_SECRETS_TOKEN: 'TEST-TOKEN',
+  GITHUB_REPOSITORY: 'owner/repo',
+  EPIC_REFRESH_TOKEN: 'OLD-REFRESH',
+};
+ok(await epic.persistLegendaryRefreshToken(ciEnv) === true,
+   'a token rotated by the legendary CLI is saved before the runner exits');
+ok(ciEnv.EPIC_REFRESH_TOKEN === 'NEW-REFRESH',
+   'the in-process CI environment receives the replacement too');
+ok(calls.some((u) => u.includes('/actions/secrets/EPIC_REFRESH_TOKEN')),
+   'the dedicated refresh-token secret was updated');
+
+const { runLegendary } = await import('../lib/epic.mjs');
+let commandFailed = false;
+try {
+  await runLegendary(['list', '--json'], {}, {
+    bin: 'fake-legendary',
+    env: ciEnv,
+    exec: async () => {
+      const current = JSON.parse(readFileSync(cfgFile, 'utf8'));
+      writeFileSync(cfgFile, JSON.stringify({
+        ...current,
+        refresh_token: 'CLI-ROTATED-AFTER-AUTH',
+      }, null, 2));
+      throw new Error('catalogue request failed after authentication');
+    },
+  });
+} catch {
+  commandFailed = true;
+}
+ok(commandFailed, 'the simulated legendary catalogue command failed');
+ok(ciEnv.EPIC_REFRESH_TOKEN === 'CLI-ROTATED-AFTER-AUTH',
+   'a CLI rotation is still persisted when its later catalogue request fails');
+
+let manualError = null;
+try {
+  await epic.claim({}, {
+    title: 'Free Game',
+    store: 'epic',
+    url: 'https://store.epicgames.com/example',
+  });
+} catch (e) {
+  manualError = e;
+}
+ok(manualError?.manualAction === true,
+   'Epic checkout is explicitly handed to a real browser');
+ok(!calls.some((u) => /purchase|confirm-order/.test(u)),
+   'the tool never sends a checkout request that cannot pass Epic browser checks');
 
 // No stray temp file left next to a credential.
 const { readdirSync } = await import('node:fs');

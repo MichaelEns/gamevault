@@ -378,18 +378,21 @@ function renderFreebies() {
   const box = $('#freebies');
   if (!box) return;
 
-  // Failures first and in red: the entire justification for automating claims
-  // is that a failure gets noticed. A quiet automation that has stopped
-  // working is worse than no automation, because it replaces a chore you
-  // would notice with a confidence you would not.
+  // Claim actions first and in red. GOG can be claimed unattended; Epic's
+  // current checkout requires browser confirmation, so both failed automation
+  // and pending human action live here until the library proves ownership.
   const failures = (SNAP?.claimFailures ?? []).filter((f) => f.failedAt || f.error);
+  const manualCount = failures.filter((f) => f.manual).length;
+  const failureHeading = manualCount === failures.length
+    ? `${failures.length} free game${failures.length > 1 ? 's' : ''} ${failures.length > 1 ? 'need' : 'needs'} browser confirmation`
+    : `${failures.length} free-game action${failures.length > 1 ? 's need' : ' needs'} attention`;
   const failHtml = failures.length ? `
     <div class="claim-fail">
-      <strong>${failures.length} automatic claim${failures.length > 1 ? 's' : ''} did not work</strong>
+      <strong>${failureHeading}</strong>
       <ul class="free-list">${failures.map((f) => `<li>
         ${esc(f.title)}
         <span class="free-note">${esc(f.reason ?? f.error ?? 'did not arrive')}</span>
-        ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">claim it yourself</a>` : ''}
+        ${f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">open in store</a>` : ''}
       </li>`).join('')}</ul>
     </div>` : '';
 
@@ -413,9 +416,7 @@ function renderFreebies() {
   const freeHtml = worth.length ? `
     <h2 class="free-title">Free to keep &mdash; ${worth.length} you don&rsquo;t have</h2>
     <ul class="free-list">${rows}</ul>
-    <p class="free-foot">${SNAP?.claimLog?.length
-      ? 'Claimed automatically, then confirmed against your library on the next sync.'
-      : 'Claim once and it is yours permanently.'}</p>` : '';
+    <p class="free-foot">Open each offer before it ends. GameVault confirms ownership on the next sync.</p>` : '';
 
   box.innerHTML = failHtml + freeHtml;
   box.classList.remove('hidden');
@@ -556,7 +557,6 @@ function renderConnect(state = {}) {
         <option value="UBISOFT_EMAIL">UBISOFT_EMAIL &mdash; Ubisoft Connect login</option>
         <option value="UBISOFT_PASSWORD">UBISOFT_PASSWORD &mdash; no 2FA accounts only</option>
         <option value="LEGENDARY_CONFIG">LEGENDARY_CONFIG &mdash; Epic (base64)</option>
-        <option value="EPIC_COOKIES">EPIC_COOKIES &mdash; Epic claiming (fallback)</option>
         <option value="NILE_CONFIG">NILE_CONFIG &mdash; Prime Gaming (base64)</option>
       </select>
       <label for="secretValue">Value</label>
@@ -1052,4 +1052,3 @@ $('#results').addEventListener('click', async (e) => {
     btn.textContent = `Could not track it: ${err.message}`;
   }
 });
-
