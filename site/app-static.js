@@ -9,12 +9,15 @@
  * clears it; the passphrase is never persisted.
  */
 import { decryptJson } from './snapshot-crypto.mjs';
-import { livePrice, storeLinks } from './live-prices.js';
+import { liveSearch, livePrice, livePrices, storeLinks, _clearCache } from './live-prices.js';
+import { normalizeTitle as normalize, isRelevant } from './match.mjs';
+import { scoreDeal } from './deal.mjs';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
 let SNAP = null;
+let searchGeneration = 0;
 
 // Live GitHub secret state, used to tell "never set" from "set since this build".
 let LIVE_SECRETS = null;
@@ -225,6 +228,8 @@ $('#unlockForm').addEventListener('submit', async (e) => {
 })();
 
 $('#lockBtn').addEventListener('click', () => {
+  searchGeneration++;
+  _clearCache();
   SNAP = null;                      // drop the plaintext from memory
   forget();                         // Lock means lock: don't auto-reopen
   globalThis.__gvUnlocked = false;  // a pending update may now apply freely
@@ -810,71 +815,65 @@ function showNotice(msg) {
 }
 
 // ---------- search ----------
-// Mirrors lib/match.mjs normalisation. Kept deliberately simple: the heavy
-// matching already happened when the snapshot was built.
-function normalize(title) {
-  return String(title ?? '')
-    .replace(/[\u2122\u00ae\u00a9\u2120]/g, ' ')
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase().replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+(windows|pc|for pc)$/g, ' ')
-    .replace(/^(the|a|an)\s+(?=.)/, '')
-    .trim();
-}
-
 $('#searchForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const term = $('#q').value.trim();
   if (!term || !SNAP) return;
+  search(term);
+});
 
+async function search(term) {
+  const snap = SNAP;
+  const generation = ++searchGeneration;
   const q = normalize(term);
+  if (!q || !snap) return;
   const seen = new Set();
   const hits = [];
 
-  const consider = (norm, title) => {
+  const consider = (norm, title, game = null) => {
     if (!norm || seen.has(norm)) return;
-    if (!norm.includes(q) && !q.includes(norm)) return;
+    if (!isRelevant(term, title)) return;
     seen.add(norm);
-    hits.push({ norm, title });
+    hits.push({ norm, title, game });
   };
 
-  for (const [norm, entries] of Object.entries(SNAP.index)) {
+  for (const [norm, entries] of Object.entries(snap.index)) {
     consider(norm, entries[0]?.title ?? norm);
   }
-  for (const s of Object.values(SNAP.subs)) {
+  for (const s of Object.values(snap.subs)) {
     for (const norm of s.norms) consider(norm, norm);
   }
-  for (const [norm, p] of Object.entries(SNAP.prices)) consider(norm, p.title);
+  for (const [norm, p] of Object.entries(snap.prices)) consider(norm, p.title);
 
-  hits.sort((a, b) => {
+  const sort = () => hits.sort((a, b) => {
     const ax = a.norm === q ? 0 : a.norm.startsWith(q) ? 1 : 2;
     const bx = b.norm === q ? 0 : b.norm.startsWith(q) ? 1 : 2;
     return ax - bx || a.title.localeCompare(b.title);
   });
 
+  sort();
+  render(hits.slice(0, 40), term, true);
+  $('#sources').textContent += ' · Searching live catalog…';
+  const catalog = await liveSearch(term, snap.live);
+  if (generation !== searchGeneration || snap !== SNAP) return;
+  for (const game of catalog.games) {
+    const norm = normalize(game.title);
+    const existing = hits.find((h) => h.norm === norm);
+    if (existing) existing.game = game;
+    else consider(norm, game.title, game);
+  }
+  sort();
   render(hits.slice(0, 40), term);
-});
+  $('#sources').textContent += catalog.error
+    ? ` · ${catalog.error}`
+    : catalog.available ? ' · Live catalog searched'
+      : ' · Live catalog disabled; snapshot matches only';
+}
 
-function render(hits, term) {
+function render(hits, term, searching = false) {
   const results = $('#results');
   if (!hits.length) {
-    // A game absent from your library, the rosters AND the priced set is the
-    // most interesting search there is: it is something you might buy. Ending
-    // at "nothing matching" answered the ownership question and abandoned the
-    // price one, so treat a miss as a live lookup instead of a dead end.
-    results.innerHTML =
-      `<article class="card v-unknown" data-norm="${esc(normalize(term))}" data-title="${esc(term)}">
-         <div class="card-head">
-           <h2 class="title">${esc(term)}</h2>
-           <span class="verdict">Checking prices…</span>
-         </div>
-         <p class="reason">You do not own this on any connected store, and it is not in a
-            subscription you have. Looking up what it costs.</p>
-         <div class="pricearea"></div>
-       </article>`;
-    fillLivePrices([{ norm: normalize(term), title: term }]);
-    return;
+    hits = [{ norm: normalize(term), title: term, missing: true }];
   }
 
   results.innerHTML = hits.map((h) => {
@@ -891,6 +890,9 @@ function render(hits, term) {
     // Derive a verdict locally when the builder had no price for this title
     // (it is in your library or a roster but was not priced).
     let v = verdict;
+    if (h.missing) v = { verdict: 'unknown',
+      label: searching ? 'Searching catalog…' : 'No catalog matches',
+      reason: 'No matching listing in the available results. Search the stores directly.' };
     if (!v) {
       if (owned.length) v = { verdict: 'owned', label: 'You already own this', reason: 'Already in your library — do not buy again.' };
       else if (access.some((a) => a.entitled)) {
@@ -932,11 +934,11 @@ function render(hits, term) {
       </article>`;
   }).join('');
 
-  fillLivePrices(hits);
+  fillLivePrices(searching ? hits.filter((h) => !h.missing) : hits);
 
   const age = ageOf(SNAP.builtAt);
   $('#sources').textContent =
-    `Offline snapshot · built ${age.label} · ${SNAP.counts.owned} owned, ${SNAP.counts.priced} priced`;
+    `Snapshot · built ${age.label} · ${SNAP.counts.owned} owned, ${SNAP.counts.priced} priced`;
 }
 
 /**
@@ -949,6 +951,7 @@ function render(hits, term) {
  * refuses the cross-origin call.
  */
 async function fillLivePrices(hits) {
+  const snap = SNAP;
   const needing = hits.filter((h) => {
     if (SNAP.prices[h.norm]?.deals?.length) return false;   // already priced
     if ((SNAP.index[h.norm] ?? []).length) return false;     // owned: not buying it
@@ -958,18 +961,21 @@ async function fillLivePrices(hits) {
   });
   if (!needing.length) return;
 
-  const { scoreDeal } = await import('./deal.mjs').catch(() => ({}));
-
+  const catalogHits = needing.filter((h) => h.game);
+  const catalogPrices = livePrices(catalogHits.map((h) => h.game), snap.live);
   await Promise.all(needing.map(async (h) => {
     const card = document.querySelector(`.card[data-norm="${cssEscape(h.norm)}"]`);
     if (!card) return;
 
-    const result = await livePrice(h.title, SNAP.live);
+    const result = h.missing ? null : h.game
+      ? (await catalogPrices)[catalogHits.indexOf(h)]
+      : await livePrice(h.title, snap.live);
+    if (snap !== SNAP || card.isConnected === false) return;
     const area = card.querySelector('.pricearea');
     const verdictEl = card.querySelector('.verdict');
     const reasonEl = card.querySelector('.reason');
 
-    if (!result) {
+    if (!result || result.error || !result.deals.length) {
       // Either live lookup is off, the browser blocked it, or ITAD has no
       // listing. Search links still answer "who sells this", and - if a token
       // is stored - the watchlist route can get real prices in a minute or
@@ -982,11 +988,17 @@ async function fillLivePrices(hits) {
         (canTrack
           ? `<button class="trackbtn" type="button" data-track="${esc(h.title)}">Track it &amp; fetch prices</button>`
           : `<div class="livenote">Connect a token in Settings to fetch real prices for this.</div>`);
-      if (verdictEl) verdictEl.textContent = 'No price data';
+      const low = result?.low
+        ? `<div class="lowline">All-time low: <strong>${money(result.low.amount, result.low.currency)}</strong></div>`
+        : '';
+      area.innerHTML += low;
+      if (verdictEl) verdictEl.textContent = h.missing ? 'No catalog matches' : 'No price data';
       if (reasonEl) reasonEl.textContent =
-        SNAP.live
-          ? 'Live price lookup was unavailable. Search the stores directly:'
-          : 'Not priced in this snapshot. Search the stores directly:';
+        h.missing ? 'No matching listing in the available results. Search the stores directly:'
+          : result?.error ? `${result.error} Search the stores directly:`
+            : result ? 'Listed in the catalog, but no current offers were found. It may be upcoming or unavailable in your region.'
+              : snap.live ? 'No exact catalog match for this title. Search the stores directly:'
+                : 'Not priced in this snapshot. Live price lookup is disabled. Search the stores directly:';
       return;
     }
 
@@ -1003,23 +1015,21 @@ async function fillLivePrices(hits) {
       : '';
 
     area.innerHTML = `<div class="prices">${rows}</div>${low}` +
-      `<div class="livenote">Live prices, fetched just now.</div>`;
+      `<div class="livenote">Live prices, fetched just now.${result.historyUnavailable ? ' Price history is unavailable.' : ''}</div>`;
 
     // Reuse the builder's own scoring so a live verdict and a snapshot
     // verdict can never disagree about the same numbers. Deals arrive sorted
     // cheapest-first, so the head is the best offer.
-    if (scoreDeal) {
-      const best = result.deals[0];
-      const v = scoreDeal({
-        owned: false, access: [],
-        current: best?.amount ?? null,
-        regular: best?.regular ?? null,
-        low: result.low?.amount ?? null,
-      });
-      card.className = `card v-${v.verdict}`;
-      if (verdictEl) verdictEl.textContent = v.label;
-      if (reasonEl) reasonEl.textContent = v.reason;
-    }
+    const best = result.deals[0];
+    const v = scoreDeal({
+      owned: false, access: [],
+      current: best?.amount ?? null,
+      regular: best?.regular ?? null,
+      low: result.low?.amount ?? null,
+    });
+    card.className = `card v-${v.verdict}`;
+    if (verdictEl) verdictEl.textContent = v.label;
+    if (reasonEl) reasonEl.textContent = v.reason;
   }));
 }
 

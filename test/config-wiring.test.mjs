@@ -35,6 +35,22 @@ const workflows = Object.fromEntries(await Promise.all(
 const workflow = workflows['snapshot.yml'];
 const anyWorkflow = Object.values(workflows).join('\n');
 
+console.log('UI-only publication never accesses game accounts or rebuilds personal data');
+const steps = workflow.split(/^\s{6}- /m);
+const stepNamed = (name) => steps.find((step) => step.startsWith(`name: ${name}\n`) ||
+  step.startsWith(`name: ${name}\r\n`));
+for (const name of ['Restore game-client tokens', 'Build snapshot']) {
+  ok(stepNamed(name)?.includes('if: ${{ !inputs.frontend_only }}'),
+     `${name} is skipped for UI-only releases`);
+}
+const preserve = stepNamed('Preserve the published encrypted snapshot for a UI-only release');
+ok(preserve?.includes('if: ${{ inputs.frontend_only }}'), 'UI-only releases reuse the encrypted snapshot');
+ok(preserve?.includes("data.format !== 'gamevault-encrypted-snapshot'") &&
+   preserve?.includes('data.encrypted !== true'), 'both files are validated before publication');
+ok(preserve?.includes('writeFile(`site/${name}`, text)'), 'original encrypted bytes are preserved');
+ok(!preserve?.includes('secrets.'), 'no account credentials are passed to the preservation step');
+ok(workflow.includes('lib/match.mjs site/'), 'the same title matcher is shipped in snapshot and browser builds');
+
 const sources = [];
 for (const dir of ['lib', 'tools']) {
   const base = path.join(PATHS.root, dir);

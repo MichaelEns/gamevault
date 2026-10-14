@@ -19,7 +19,9 @@
  * (`deals[].price.amount`, `deals[].regular.amount`, `.shop.name`, `.cut`),
  * not a guess at it.
  */
-import { livePrice, storeLinks, _clearCache } from '../site/live-prices.js';
+import { liveSearch, livePrice, livePrices, storeLinks, _clearCache } from '../site/live-prices.js';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 let fails = 0;
 const ok = (cond, msg) => {
@@ -108,7 +110,8 @@ for (const [label, routes] of [
   _clearCache();
   stubFetch(routes);
   const r = await livePrice('007 First Light', LIVE);
-  ok(r === null, `${label} -> null`);
+  ok(label === 'no search results' ? r === null : r?.deals.length === 0,
+     `${label} never becomes a price or removes a catalog listing`);
 }
 
 console.log('\nMissing history is survivable; missing prices is not');
@@ -179,6 +182,84 @@ ok(seenUrl.includes('key=test-key'), 'the key is passed to ITAD');
 ok(!seenUrl.includes('/test-key'), 'and is not interpolated into the path');
 
 globalThis.fetch = realFetch;
+
+console.log('\nCatalog searches return every relevant title, independently of offers');
+try {
+  const title = "Castlevania: Belmont's Curse";
+  const game = { id: 'belmont', title };
+  const anniversary = { id: 'anniversary', title: 'Castlevania Anniversary Collection' };
+  _clearCache();
+  let pricesCalled = 0;
+  stubFetch({
+    '/games/search/v1': (url) => {
+      assert.equal(url.searchParams.get('results'), '50');
+      return [
+        anniversary, game, { id: 'demo', title: `${title} Demo` },
+        { id: 'wrong', title: 'Unrelated game' }, game, { title: 'Malformed game' },
+      ];
+    },
+    '/games/prices/v3': (_, opts) => {
+      pricesCalled++;
+      const ids = JSON.parse(opts.body);
+      return [{ id: 'wrong', deals: PRICES[0].deals },
+        ...ids.map((id) => ({ id, deals: id === 'belmont' ? [] : PRICES[0].deals }))];
+    },
+    '/games/historylow/v1': [],
+  });
+  const catalog = await liveSearch('Castlevania', LIVE);
+  assert.deepEqual(catalog.games.map((g) => g.id), ['anniversary', 'belmont']);
+  assert.equal(pricesCalled, 0, 'discovery does not require prices');
+  const results = await livePrices(catalog.games, LIVE);
+  assert.equal(pricesCalled, 1, 'all catalog prices are fetched in one batch');
+  assert.equal(results[1].title, title);
+  assert.deepEqual(results[1].deals, [], 'no-price title survives without borrowing unrelated offers');
+  assert.equal((await livePrice(title, LIVE)).deals.length, 0);
+  assert.equal(pricesCalled, 1, 'ID cache is reused by exact lookup');
+  assert.equal(await livePrice('Castlevania', LIVE), null, 'broad query cannot inherit first result prices');
+
+  _clearCache();
+  let requestedIds;
+  stubFetch({
+    '/games/search/v1': [anniversary, game],
+    '/games/prices/v3': (_, opts) => { requestedIds = JSON.parse(opts.body); return []; },
+    '/games/historylow/v1': [],
+  });
+  const exact = await livePrice(title.replace("'", '\u2019'), LIVE);
+  assert.equal(exact.title, title);
+  assert.deepEqual(requestedIds, ['belmont'], 'correct result is selected even when not first');
+  for (const term of ["Belmont's", 'Belmont', title]) {
+    assert((await liveSearch(term, LIVE)).games.some((g) => g.id === 'belmont'), term);
+  }
+
+  _clearCache();
+  const countries = [];
+  stubFetch({
+    '/games/prices/v3': (url) => { countries.push(url.searchParams.get('country')); return []; },
+    '/games/historylow/v1': [],
+  });
+  await livePrices([game], LIVE);
+  await livePrices([game], { ...LIVE, country: 'CA' });
+  assert.deepEqual(countries, ['US', 'CA'], 'country prices never share cache entries');
+
+  _clearCache();
+  stubFetch({ '/games/search/v1': { error: 'not an array' } });
+  assert((await liveSearch(title, LIVE)).error, 'malformed catalog surfaces as a failure');
+  stubFetch({ '/games/search/v1': [game] });
+  assert.equal((await liveSearch(title, LIVE)).games[0].id, 'belmont', 'failed catalog request is retried');
+
+  _clearCache();
+  stubFetch({ '/games/prices/v3': new TypeError('Failed to fetch'), '/games/historylow/v1': [] });
+  assert((await livePrices([game], LIVE))[0].error, 'price failure is explicit');
+  stubFetch({ '/games/prices/v3': [], '/games/historylow/v1': [] });
+  assert.equal((await livePrices([game], LIVE))[0].error, undefined, 'price failure is retried');
+
+  assert.equal(await readFile(new URL('../site/match.mjs', import.meta.url), 'utf8'),
+    await readFile(new URL('../lib/match.mjs', import.meta.url), 'utf8'),
+    'client and snapshot share the exact canonical matching rules');
+  ok(true, 'catalog merging, exact identity, no-price entries, batching and retry contracts');
+} finally {
+  globalThis.fetch = realFetch;
+}
 
 if (fails) { console.log(`\n${fails} assertion(s) failed.`); process.exit(1); }
 console.log('\nAll live-price assertions passed.');

@@ -14,7 +14,7 @@ browser origin:
 | Steam storesearch / appdetails | **blocked** (no `Access-Control-Allow-Origin`) |
 | GOG catalog | **blocked** (`ACAO: https://www.gog.com`) |
 | Game Pass sigls | **blocked** |
-| IsThereAnyDeal | **blocked** |
+| IsThereAnyDeal | successful authenticated responses can be allowed; errors may be blocked |
 | Microsoft displaycatalog | allowed |
 | Nintendo Algolia | allowed |
 
@@ -49,9 +49,9 @@ for 30 seconds, four times a day, then destroys it. Between builds, the
 only thing serving you is a CDN handing out a 51 KB file.
 
 The honest trade: **compute time for freshness.** You are not getting a free
-server; you are getting no server. Prices are as fresh as the last build
-rather than live. Ownership and subscription data barely move, so that half
-loses nothing.
+server; you are getting no server. Snapshot prices are as fresh as the last build. When enabled, live catalog
+search and prices supplement those results. Ownership and subscription data
+remain snapshot-based.
 
 Free ceilings, for reference:
 
@@ -169,8 +169,18 @@ quietly publishing your library in the clear.
 | Prices + all-time lows | **the volatile part** |
 | Pre-computed deal verdicts | as above |
 
-Priced titles = everything you own, plus `watchlist.txt`. Add anything you
-are waiting to buy so the verdict is ready when a sale hits.
+Priced titles come from the watchlist and trending games, within the configured
+budget. Owned games are skipped unless `PRICE_OWNED=1`. Use the `WATCHLIST`
+repository variable or `watchlist.txt` to track games you are waiting to buy.
+
+Search shows snapshot matches immediately, then merges relevant live
+IsThereAnyDeal catalog results even if a local match already exists. Catalog
+entries remain visible without current offers; absence of prices does not mean
+the game is free or missing. Ownership and subscription checks use canonical
+title keys, never a broad query or the first catalog suggestion. Live lookup
+requires an unlocked snapshot containing the read-only ITAD key and browser
+access to the API; `LIVE_PRICES=0` disables it. Failures are shown beside the
+results, with direct storefront search links as the fallback.
 
 Every price in the UI is labelled with its age; anything over 12 hours is
 flagged. A confidently-wrong stale price is worse than an obviously old one.
@@ -185,3 +195,9 @@ flagged. A confidently-wrong stale price is worse than an obviously old one.
 Cron on public repos is best-effort and can be delayed under load, and
 GitHub disables schedules after 60 days of repo inactivity. The manual
 trigger covers both.
+
+For a UI-only release, manually run the workflow with `frontend_only=true`.
+This preserves the published encrypted snapshot byte-for-byte and does not
+access game accounts, rotate their credentials, or claim giveaways. Push such
+releases with `[skip ci]` in the commit message before running that manual
+deployment, to avoid also triggering the normal snapshot build.

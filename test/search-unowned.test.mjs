@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { PATHS } from '../lib/paths.mjs';
 import { _clearCache } from '../site/live-prices.js';
+import assert from 'node:assert/strict';
 
 const CLIENT = path.join(PATHS.root, 'site', 'app-static.js');
 
@@ -30,6 +31,7 @@ const ok = (cond, msg) => {
 const nodes = new Map();
 function makeNode(id) {
   const classes = new Set();
+  const events = new Map();
   const node = {
     id, innerHTML: '', textContent: '', value: '', checked: false, disabled: false,
     style: {}, dataset: {},
@@ -38,7 +40,8 @@ function makeNode(id) {
       contains: (c) => classes.has(c),
     },
     _classes: classes,
-    addEventListener() {}, focus() {},
+    addEventListener(type, handler) { events.set(type, handler); }, focus() {},
+    _events: events,
     querySelector: () => null,
   };
   return node;
@@ -61,8 +64,7 @@ globalThis.document = {
       const m = sel.match(/data-norm="([^"]*)"/);
       const norm = m?.[1];
       if (norm === undefined) return null;
-      if (!cards.has(norm)) cards.set(norm, makeCard(norm));
-      return cards.get(norm);
+      return cards.get(norm) ?? null;
     }
     return nodes.get(sel.replace(/^#/, '')) ?? null;
   },
@@ -82,7 +84,7 @@ globalThis.CSS = undefined;
 function makeCard(norm) {
   const parts = { pricearea: makeNode('pricearea'), verdict: makeNode('verdict'), reason: makeNode('reason') };
   return {
-    className: '', dataset: { norm },
+    className: '', dataset: { norm }, isConnected: true,
     querySelector: (sel) => parts[sel.replace('.', '')] ?? null,
     _parts: parts,
   };
@@ -97,7 +99,7 @@ function theCard() {
 
 // ---- load the real client with private functions exposed -------------------
 const src = await readFile(CLIENT, 'utf8');
-const hooked = `${src}\nglobalThis.__render = render;\nglobalThis.__setSnap = (s) => { SNAP = s; };\n`;
+const hooked = `${src}\nglobalThis.__render = render;\nglobalThis.__search = search;\nglobalThis.__setSnap = (s) => { SNAP = s; };\n`;
 const hookedPath = path.join(PATHS.root, 'site', `.hooked-search-${process.pid}.mjs`);
 await writeFile(hookedPath, hooked, 'utf8');
 
@@ -109,12 +111,12 @@ const PRICED = [{
 }];
 
 /** Route ITAD calls; `mode` decides whether the browser is allowed to. */
-function net(mode) {
+function net(mode, games = [{ id: 'g1', title: '007 First Light' }]) {
   globalThis.fetch = async (url) => {
     if (mode === 'cors-blocked') throw new TypeError('Failed to fetch');
     const u = new URL(url);
     if (u.pathname.startsWith('/games/search/v1')) {
-      return { ok: true, status: 200, json: async () => [{ id: 'g1', title: '007 First Light' }] };
+      return { ok: true, status: 200, json: async () => games };
     }
     if (u.pathname.startsWith('/games/prices/v3')) {
       return { ok: true, status: 200, json: async () => PRICED };
@@ -134,6 +136,18 @@ const BASE_SNAP = {
 };
 
 const results = nodes.get('results');
+let html = '';
+Object.defineProperty(results, 'innerHTML', {
+  get() { return html; },
+  set(value) {
+    html = value;
+    for (const card of cards.values()) card.isConnected = false;
+    cards.clear();
+    for (const match of value.matchAll(/<article[^>]*data-norm="([^"]*)"/g)) {
+      cards.set(match[1], makeCard(match[1]));
+    }
+  },
+});
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 try {
@@ -142,7 +156,7 @@ try {
   console.log('An unowned game is no longer a dead end');
   globalThis.__setSnap({ ...BASE_SNAP, live: { itadKey: 'k', country: 'US' } });
   net('ok');
-  globalThis.__render([], '007 First Light');
+  await globalThis.__search('007 First Light');
   ok(!/Nothing matching/i.test(results.innerHTML),
      'the "nothing matching" dead end is gone');
   ok(/<article class="card/.test(results.innerHTML),
@@ -164,7 +178,7 @@ try {
   net('cors-blocked');
   cards.clear();
   _clearCache();
-  globalThis.__render([], '007 First Light');
+  await globalThis.__search('007 First Light');
   await flush(); await flush(); await flush();
   const blocked = theCard();
   ok(/storelink/.test(blocked._parts.pricearea.innerHTML),
@@ -173,8 +187,10 @@ try {
      'including Steam');
   ok(/007%20First%20Light/.test(blocked._parts.pricearea.innerHTML),
      'pre-filled with the title searched for');
-  ok(blocked._parts.verdict.textContent === 'No price data',
+  ok(blocked._parts.verdict.textContent === 'No catalog matches',
      `the verdict is honest about it (got "${blocked._parts.verdict.textContent}")`);
+  ok(/Live catalog search failed/.test(nodes.get('sources').textContent),
+     'the failed catalog request is visible rather than disguised as an empty successful search');
 
   console.log('\nA game you own is not looked up at all');
   let calls = 0;
@@ -206,7 +222,7 @@ try {
   console.log('\nWithout a live key the app falls back rather than failing');
   globalThis.__setSnap({ ...BASE_SNAP, live: null });
   cards.clear();
-  globalThis.__render([], '007 First Light');
+  await globalThis.__search('007 First Light');
   await flush(); await flush();
   const nokey = theCard();
   ok(/storelink/.test(nokey._parts.pricearea.innerHTML),
@@ -215,9 +231,89 @@ try {
   console.log('\nSearch terms are escaped, not injected');
   globalThis.__setSnap({ ...BASE_SNAP, live: null });
   cards.clear();
-  globalThis.__render([], '<img src=x onerror=alert(1)>');
+  await globalThis.__search('<img src=x onerror=alert(1)>');
   ok(!/<img src=x/.test(results.innerHTML),
      'a script-y search term is escaped in the no-results card');
+
+  console.log('\nLocal matches never suppress live catalog discovery');
+  _clearCache();
+  const title = "Castlevania: Belmont's Curse";
+  const game = { id: 'belmont', title };
+  const anniversary = { id: 'anniversary', title: 'Castlevania Anniversary Collection' };
+  const norm = 'castlevania belmont s curse';
+  globalThis.__setSnap({
+    ...BASE_SNAP,
+    index: { 'castlevania anniversary collection': [{ store: 'steam', title: anniversary.title }] },
+    live: { itadKey: 'k', country: 'US' },
+  });
+  net('ok', [anniversary, game]);
+  await globalThis.__search('Castlevania');
+  await flush(); await flush();
+  assert.equal(cards.size, 2);
+  assert.match(results.innerHTML, /You already own this/);
+  assert.match(results.innerHTML, /Belmont&#39;s Curse/);
+  const unpriced = cards.get(norm);
+  assert.equal(unpriced._parts.verdict.textContent, 'No price data');
+  assert.match(unpriced._parts.reason.textContent, /Listed in the catalog/);
+  assert.match(unpriced._parts.pricearea.innerHTML, /storelink/);
+  assert(!unpriced.className.includes('v-free'), 'missing price is not free');
+  assert.match(nodes.get('sources').textContent, /Live catalog searched/);
+
+  for (const term of ["Belmont's", title, title.replace("'", '\u2019')]) {
+    await globalThis.__search(term);
+    await flush();
+    assert(cards.has(norm), `target discovered for ${term}`);
+  }
+
+  console.log('\nCanonical identity preserves ownership, editions and distinct sequels');
+  _clearCache();
+  globalThis.__setSnap({
+    ...BASE_SNAP,
+    index: { hades: [{ store: 'steam', title: 'Hades' }] },
+    subs: { pc: { label: 'PC Game Pass', norms: ['hades 2'] } },
+    live: { itadKey: 'k', country: 'US' },
+  });
+  net('ok', [{ id: 'h1', title: 'Hades Deluxe Edition' }, { id: 'h2', title: 'Hades II' },
+    { id: 'h3', title: 'Hades 3' }]);
+  await globalThis.__search('Hades');
+  await flush();
+  assert.equal(cards.size, 3, 'duplicate edition merged without merging sequels');
+  assert.equal((results.innerHTML.match(/You already own this/g) ?? []).length, 1);
+  assert.equal((results.innerHTML.match(/Included in your subscription/g) ?? []).length, 1);
+  assert(cards.has('hades 3'));
+
+  console.log('\nA slower previous search cannot overwrite the newer results');
+  _clearCache();
+  let releaseOld;
+  globalThis.fetch = async (url) => {
+    const u = new URL(url);
+    if (u.pathname.startsWith('/games/search/v1')) {
+      if (u.searchParams.get('title') === 'Castlevania') {
+        await new Promise((resolve) => { releaseOld = resolve; });
+        return { ok: true, json: async () => [game] };
+      }
+      return { ok: true, json: async () => [{ id: 'celeste', title: 'Celeste' }] };
+    }
+    return { ok: true, json: async () => [] };
+  };
+  const oldSearch = globalThis.__search('Castlevania');
+  await globalThis.__search('Celeste');
+  releaseOld();
+  await oldSearch;
+  await flush();
+  assert.equal(cards.size, 1);
+  assert(cards.has('celeste'));
+
+  console.log('\nPending catalog and prices cannot repopulate a locked app');
+  _clearCache();
+  const lockedSearch = globalThis.__search('Castlevania');
+  nodes.get('lockBtn')._events.get('click')();
+  releaseOld();
+  await lockedSearch;
+  await flush();
+  assert.equal(results.innerHTML, '');
+  assert.equal(cards.size, 0);
+  ok(true, 'merged search, no-price catalog, ownership and race regressions');
 } finally {
   await rm(hookedPath, { force: true });
 }

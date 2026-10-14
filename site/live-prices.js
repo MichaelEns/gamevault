@@ -1,4 +1,4 @@
-// Live, on-demand price lookup for games that are not in the snapshot.
+// Live catalog search and prices, independent of snapshot coverage.
 //
 // Why this exists: the snapshot prices a fixed budget of titles, and pricing
 // games you already own answers a question nobody asks. The interesting case -
@@ -11,11 +11,14 @@
 // well be allowed. Rather than guess, we try, and fall back to storefront
 // search links when the browser blocks us. Either way the card is useful.
 
+import { normalizeTitle, isRelevant, isAddon } from './match.mjs';
+
 const BASE = 'https://api.isthereanydeal.com';
 
 // Session-scoped so a repeated search is instant and we never hammer the API,
 // but a new tab picks up genuinely fresh prices.
 const memo = new Map();
+const searches = new Map();
 
 /** Storefront search URLs — the fallback that always works, no API needed. */
 export function storeLinks(title) {
@@ -35,80 +38,122 @@ async function itad(path, key, { method = 'GET', body = null, params = {} } = {}
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`ITAD ${path} ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error(`ITAD ${path} returned an invalid response`);
+  return data;
 }
 
-/**
- * Look up current deals and the all-time low for a title.
- *
- * Resolves to null when live lookup is unavailable (no key, CORS refusal,
- * nothing found) so callers can fall back without special-casing errors.
- */
-export async function livePrice(title, live) {
-  if (!live?.itadKey || !title) return null;
-
-  const cacheKey = title.toLowerCase();
-  if (memo.has(cacheKey)) return memo.get(cacheKey);
+/** Catalog results survive missing prices; failures remain visible to the UI. */
+export async function liveSearch(title, live) {
+  if (!live?.itadKey || !normalizeTitle(title)) {
+    return { games: [], available: false, error: null };
+  }
+  const cacheKey = `${live.itadKey}\0${normalizeTitle(title)}`;
+  if (searches.has(cacheKey)) return searches.get(cacheKey);
 
   const pending = (async () => {
-    const country = live.country || 'US';
-
-    const found = await itad('/games/search/v1', live.itadKey, {
-      params: { title, results: '5' },
-    });
-    const game = Array.isArray(found) ? found[0] : found?.[0];
-    if (!game?.id) return null;
-
-    // Prices and the historical low are separate endpoints; one without the
-    // other cannot answer "is this actually a good price", so fetch both and
-    // tolerate the low failing on its own.
-    const [pricesRes, lowRes] = await Promise.all([
-      itad('/games/prices/v3', live.itadKey, {
-        method: 'POST',
-        body: [game.id],
-        params: { country, capacity: '12', nondeals: 'true', vouchers: 'true' },
-      }),
-      itad('/games/historylow/v1', live.itadKey, {
-        method: 'POST', body: [game.id], params: { country },
-      }).catch(() => null),
-    ]);
-
-    const entry = pricesRes?.find?.((e) => e.id === game.id) ?? pricesRes?.[0];
-    const deals = (entry?.deals ?? []).map((d) => ({
-      shop: d.shop?.name ?? 'unknown',
-      amount: d.price?.amount ?? null,
-      regular: d.regular?.amount ?? null,
-      currency: d.price?.currency ?? 'USD',
-      cut: d.cut ?? 0,
-      url: d.url ?? null,
-    })).filter((d) => d.amount !== null)
-      .sort((a, b) => a.amount - b.amount);
-
-    const lowEntry = lowRes?.find?.((e) => e.id === game.id) ?? lowRes?.[0];
-    const low = lowEntry?.low
-      ? {
-          amount: lowEntry.low.amount,
-          currency: lowEntry.low.currency,
-          shop: lowEntry.low.shop?.name ?? null,
-        }
-      : null;
-
-    if (!deals.length) return null;
-    return { title: game.title ?? title, deals, low, live: true };
-  })().catch(() => null)   // CORS refusal, network, or malformed response.
-    .then((result) => {
-      // Only successes are worth remembering. Caching a null would let one
-      // dropped request hide a game's prices for the rest of the session, and
-      // the retry costs nothing because the user has to search again anyway.
-      if (result === null) memo.delete(cacheKey);
-      return result;
-    });
-
-  memo.set(cacheKey, pending);
+    try {
+      const found = await itad('/games/search/v1', live.itadKey, {
+        params: { title, results: '50' },
+      });
+      const seen = new Set();
+      const games = found.filter((game) => {
+        if (!game?.id || typeof game.title !== 'string' || seen.has(game.id)) return false;
+        if (game.type === 'dlc' || isAddon(game.title) || !isRelevant(title, game.title)) return false;
+        seen.add(game.id);
+        return true;
+      }).map(({ id, title }) => ({ id, title }));
+      return { games, available: true, error: null };
+    } catch {
+      return { games: [], available: true,
+        error: 'Live catalog search failed. The service may be unavailable or blocked by the browser.' };
+    }
+  })().then((result) => {
+    if (result.error && searches.get(cacheKey) === pending) searches.delete(cacheKey);
+    return result;
+  });
+  searches.set(cacheKey, pending);
   return pending;
 }
 
+/**
+ * Price a known catalog ID, or an exact canonical title match.
+ *
+ * A broad query must never borrow the first game's prices. Empty deals are
+ * a valid catalog result, not a failed search or a zero-dollar offer.
+ */
+export async function livePrice(title, live, game = null) {
+  if (!live?.itadKey || !title) return null;
+  if (!game) {
+    const found = await liveSearch(title, live);
+    game = found.games.find((g) => normalizeTitle(g.title) === normalizeTitle(title));
+  }
+  if (!game?.id || normalizeTitle(game.title) !== normalizeTitle(title)) return null;
+  return (await livePrices([game], live))[0];
+}
+
+/** Batch visible catalog entries instead of making two requests per card. */
+export async function livePrices(games, live) {
+  if (!live?.itadKey || !games.length) return [];
+  const country = live.country || 'US';
+  const key = (game) => `${live.itadKey}\0${country}\0${game.id}`;
+  const missing = [...new Map(games.filter((g) => !memo.has(key(g))).map((g) => [g.id, g])).values()];
+
+  if (missing.length) {
+    const pending = (async () => {
+      const [pricesRes, lowRes] = await Promise.all([
+        itad('/games/prices/v3', live.itadKey, {
+          method: 'POST',
+          body: missing.map((g) => g.id),
+          params: { country, capacity: '12', nondeals: 'true', vouchers: 'true' },
+        }),
+        itad('/games/historylow/v1', live.itadKey, {
+          method: 'POST', body: missing.map((g) => g.id), params: { country },
+        }).catch(() => null),
+      ]);
+
+      return missing.map((game) => {
+        const entry = pricesRes.find((e) => e.id === game.id);
+        const deals = (entry?.deals ?? []).map((d) => ({
+          shop: d.shop?.name ?? 'unknown',
+          amount: d.price?.amount ?? null,
+          regular: d.regular?.amount ?? null,
+          currency: d.price?.currency ?? 'USD',
+          cut: d.cut ?? 0,
+          url: d.url ?? null,
+        })).filter((d) => typeof d.amount === 'number' && Number.isFinite(d.amount) && d.amount >= 0)
+          .sort((a, b) => a.amount - b.amount);
+
+        const lowEntry = lowRes?.find((e) => e.id === game.id);
+        const low = typeof lowEntry?.low?.amount === 'number' && Number.isFinite(lowEntry.low.amount)
+          ? {
+              amount: lowEntry.low.amount,
+              currency: lowEntry.low.currency,
+              shop: lowEntry.low.shop?.name ?? null,
+            }
+          : null;
+
+        return { title: game.title, deals, low, live: true, historyUnavailable: lowRes === null };
+      });
+    })().catch(() => missing.map((game) => ({
+      title: game.title, deals: [], low: null, live: true,
+      error: 'Live price lookup failed. The service may be unavailable or blocked by the browser.',
+    })));
+
+    missing.forEach((game, i) => {
+      const entry = pending.then((results) => {
+        const result = results[i];
+        if ((result.error || result.historyUnavailable) && memo.get(key(game)) === entry) memo.delete(key(game));
+        return result;
+      });
+      memo.set(key(game), entry);
+    });
+  }
+  return Promise.all(games.map((game) => memo.get(key(game))));
+}
+
 /** Reset between tests. */
-export function _clearCache() { memo.clear(); }
+export function _clearCache() { memo.clear(); searches.clear(); }
