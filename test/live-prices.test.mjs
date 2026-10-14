@@ -47,6 +47,11 @@ const LOWS = [{ id: 'uuid-007', low: { amount: 44.99, currency: 'USD', shop: { n
 /** Stub fetch, routing by path the way the real API does. */
 function stubFetch(routes) {
   globalThis.fetch = async (url, opts = {}) => {
+    if (opts.method === 'POST') {
+      assert.equal(opts.headers?.['content-type'], 'text/plain;charset=UTF-8',
+        'price/history POST must not require the content-type preflight ITAD refuses');
+      assert(Array.isArray(JSON.parse(opts.body)), 'the payload remains a JSON array of exact game IDs');
+    }
     const u = new URL(url);
     const hit = Object.entries(routes).find(([p]) => u.pathname.startsWith(p));
     if (!hit) return { ok: false, status: 404, json: async () => ({}) };
@@ -99,6 +104,10 @@ console.log('\nThe fallback answers "who sells this" without any API at all');
      'the title is URL-encoded, so titles with spaces and symbols still search');
   ok(links.some((l) => /steam/i.test(l.shop)) && links.some((l) => /gog/i.test(l.shop)),
      'the big PC stores are covered');
+  const xbox = links.find((l) => l.shop === 'Xbox');
+  ok(new URL(xbox?.url).hostname === 'www.xbox.com' &&
+     new URL(xbox.url).searchParams.get('q') === '007 First Light',
+     'Xbox store search is included with the exact title');
 }
 
 console.log('\nDegenerate responses are treated as "no data", not as a price');

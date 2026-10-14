@@ -181,6 +181,9 @@ title keys, never a broad query or the first catalog suggestion. Live lookup
 requires an unlocked snapshot containing the read-only ITAD key and browser
 access to the API; `LIVE_PRICES=0` disables it. Failures are shown beside the
 results, with direct storefront search links as the fallback.
+These links include Xbox as well as PC stores. Browser price/history POSTs
+send JSON game IDs with a CORS-safelisted `text/plain` content type: ITAD accepts
+that payload, but rejects the preflight for an `application/json` request.
 
 Every price in the UI is labelled with its age; anything over 12 hours is
 flagged. A confidently-wrong stale price is worse than an obviously old one.
@@ -201,3 +204,7 @@ This preserves the published encrypted snapshot byte-for-byte and does not
 access game accounts, rotate their credentials, or claim giveaways. Push such
 releases with `[skip ci]` in the commit message before running that manual
 deployment, to avoid also triggering the normal snapshot build.
+Enable `verify_live_prices` on a manual release to test real authenticated
+catalog, prices and history from the Pages browser origin before publishing.
+The probe uses only the read-only ITAD key, does not decrypt your library, and
+never prints credentials.

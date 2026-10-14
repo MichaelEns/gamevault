@@ -18,6 +18,10 @@ on:
         description: 'Publish UI changes using the existing encrypted snapshot (no account access or claims)'
         type: boolean
         default: false
+      verify_live_prices:
+        description: 'Verify real catalog, prices and history in a browser using the read-only ITAD key'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -242,6 +246,18 @@ jobs:
           cp public/icon-180.png public/icon-192.png public/icon-512.png \
              public/icon-maskable.png public/style.css site/
           cp lib/snapshot-crypto.mjs lib/github-secrets.mjs lib/deal.mjs lib/match.mjs site/
+
+      - name: Verify authenticated browser prices
+        if: ${{ inputs.verify_live_prices }}
+        env:
+          ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
+          COUNTRY: ${{ vars.COUNTRY || 'US' }}
+        run: |
+          if ! node -e "import('playwright')" 2>/dev/null; then
+            npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright
+          fi
+          npx --no-install playwright install --with-deps chromium
+          node test/live-prices-browser-probe.mjs
 
       - name: Stamp the service-worker cache version
         # A constant cache name meant activate() never purged anything, so a

@@ -185,6 +185,8 @@ try {
      'storefront search links are offered instead of an empty card');
   ok(/store\.steampowered\.com/.test(blocked._parts.pricearea.innerHTML),
      'including Steam');
+  ok(/www\.xbox\.com/.test(blocked._parts.pricearea.innerHTML),
+     'including the Xbox store');
   ok(/007%20First%20Light/.test(blocked._parts.pricearea.innerHTML),
      'pre-filled with the title searched for');
   ok(blocked._parts.verdict.textContent === 'No catalog matches',

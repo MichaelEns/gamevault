@@ -27,6 +27,7 @@ export function storeLinks(title) {
     { shop: 'Steam', url: `https://store.steampowered.com/search/?term=${q}` },
     { shop: 'GOG', url: `https://www.gog.com/en/games?query=${q}` },
     { shop: 'Epic', url: `https://store.epicgames.com/en-US/browse?q=${q}` },
+    { shop: 'Xbox', url: `https://www.xbox.com/en-US/Search/Results?q=${q}` },
     { shop: 'Humble', url: `https://www.humblebundle.com/store/search?search=${q}` },
     { shop: 'IsThereAnyDeal', url: `https://isthereanydeal.com/search/?q=${q}` },
   ];
@@ -36,7 +37,9 @@ async function itad(path, key, { method = 'GET', body = null, params = {} } = {}
   const qs = new URLSearchParams({ key, ...params });
   const res = await fetch(`${BASE}${path}?${qs}`, {
     method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
+    // ITAD accepts JSON bodies but its preflight does not allow content-type.
+    // text/plain is CORS-safelisted, so the authenticated POST can reach it.
+    headers: body ? { 'content-type': 'text/plain;charset=UTF-8' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(15_000),
   });

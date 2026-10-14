@@ -50,6 +50,12 @@ ok(preserve?.includes("data.format !== 'gamevault-encrypted-snapshot'") &&
 ok(preserve?.includes('writeFile(`site/${name}`, text)'), 'original encrypted bytes are preserved');
 ok(!preserve?.includes('secrets.'), 'no account credentials are passed to the preservation step');
 ok(workflow.includes('lib/match.mjs site/'), 'the same title matcher is shipped in snapshot and browser builds');
+const browserProbe = stepNamed('Verify authenticated browser prices');
+ok(browserProbe?.includes('if: ${{ inputs.verify_live_prices }}'),
+   'authenticated browser verification is opt-in');
+ok(browserProbe?.includes('ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}') &&
+   !/\b(?:STEAM_API_KEY|SNAPSHOT_PASSPHRASE|GAMEVAULT_SECRETS_TOKEN):/.test(browserProbe),
+   'browser probe receives only the read-only price key, not account or decryption credentials');
 
 const sources = [];
 for (const dir of ['lib', 'tools']) {
