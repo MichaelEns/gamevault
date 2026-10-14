@@ -63,6 +63,7 @@ try {
         historyUnavailable: price.historyUnavailable },
     };
   }, live);
+  console.log(JSON.stringify({ origin: new URL(base).origin, ...result, responses }));
   assert.equal(result.error, undefined, result.error);
   assert(result.queries.every((q) => q.found), 'target must appear for broad and exact queries');
   assert.equal(result.target.error, undefined, result.target.error);
@@ -75,7 +76,7 @@ try {
   assert(responses.length >= 7 && responses.every((r) => r.status === 200),
     `API responses must succeed: ${JSON.stringify(responses)}`);
   assert(postTypes.length >= 4 && postTypes.every((type) => type === 'text/plain;charset=UTF-8'));
-  console.log(JSON.stringify({ origin: new URL(base).origin, ...result, responses }));
+  console.log('Authenticated live catalog, prices and historical lows passed in a real browser.');
 } finally {
   await browser.close();
 }

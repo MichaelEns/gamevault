@@ -131,10 +131,10 @@ export async function livePrices(games, live) {
           .sort((a, b) => a.amount - b.amount);
 
         const lowEntry = lowRes?.find((e) => e.id === game.id);
-        const low = typeof lowEntry?.low?.amount === 'number' && Number.isFinite(lowEntry.low.amount)
+        const low = typeof lowEntry?.low?.price?.amount === 'number' && Number.isFinite(lowEntry.low.price.amount)
           ? {
-              amount: lowEntry.low.amount,
-              currency: lowEntry.low.currency,
+              amount: lowEntry.low.price.amount,
+              currency: lowEntry.low.price.currency,
               shop: lowEntry.low.shop?.name ?? null,
             }
           : null;

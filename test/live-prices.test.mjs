@@ -15,13 +15,16 @@
  *     survived twenty passing assertions precisely because its fixture was
  *     made up rather than taken from the real thing.
  *
- * So the fixtures below mirror lib/itad.mjs's own parsing of ITAD v3
+ * The fixtures below follow the provider's documented wire examples
+ * (IsThereAnyDeal/API docs/examples/games/historylow.v1.success.json) and v3
  * (`deals[].price.amount`, `deals[].regular.amount`, `.shop.name`, `.cut`),
  * not a guess at it.
  */
 import { liveSearch, livePrice, livePrices, storeLinks, _clearCache } from '../site/live-prices.js';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 let fails = 0;
 const ok = (cond, msg) => {
@@ -31,7 +34,7 @@ const ok = (cond, msg) => {
 
 const LIVE = { itadKey: 'test-key', country: 'US' };
 
-// Exactly the wire shape lib/itad.mjs reads in prices()/historyLow().
+// Actual wire schemas: deals[].price and low.price both contain amount/currency.
 const SEARCH_HIT = [{ id: 'uuid-007', slug: '007-first-light', title: '007 First Light', type: 'game' }];
 const PRICES = [{
   id: 'uuid-007',
@@ -42,7 +45,11 @@ const PRICES = [{
       regular: { amount: 69.99, currency: 'USD' }, cut: 30, url: 'https://gmg/x' },
   ],
 }];
-const LOWS = [{ id: 'uuid-007', low: { amount: 44.99, currency: 'USD', shop: { name: 'Fanatical' }, timestamp: '2026-01-02' } }];
+const LOWS = [{ id: 'uuid-007', low: {
+  price: { amount: 44.99, amountInt: 4499, currency: 'USD' },
+  regular: { amount: 69.99, amountInt: 6999, currency: 'USD' }, cut: 36,
+  shop: { name: 'Fanatical' }, timestamp: '2026-01-02',
+} }];
 
 /** Stub fetch, routing by path the way the real API does. */
 function stubFetch(routes) {
@@ -57,7 +64,7 @@ function stubFetch(routes) {
     if (!hit) return { ok: false, status: 404, json: async () => ({}) };
     const body = typeof hit[1] === 'function' ? hit[1](u, opts) : hit[1];
     if (body instanceof Error) throw body;
-    return { ok: true, status: 200, json: async () => body };
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
   };
 }
 
@@ -268,6 +275,25 @@ try {
   ok(true, 'catalog merging, exact identity, no-price entries, batching and retry contracts');
 } finally {
   globalThis.fetch = realFetch;
+}
+
+console.log('\nSnapshot/server history uses the same documented nested price');
+const dataDir = await mkdtemp(path.join(tmpdir(), 'gamevault-itad-test-'));
+const previousDataDir = process.env.GAMEVAULT_DATA_DIR;
+process.env.GAMEVAULT_DATA_DIR = dataDir;
+try {
+  const { historyLow } = await import('../lib/itad.mjs');
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify(LOWS) });
+  const lows = await historyLow(['uuid-007'], { ITAD_API_KEY: 'synthetic-key' });
+  assert.deepEqual(lows['uuid-007'], {
+    amount: 44.99, currency: 'USD', shop: 'Fanatical', when: '2026-01-02',
+  });
+  ok(true, 'server and snapshot historical lows use low.price.amount/currency');
+} finally {
+  globalThis.fetch = realFetch;
+  if (previousDataDir === undefined) delete process.env.GAMEVAULT_DATA_DIR;
+  else process.env.GAMEVAULT_DATA_DIR = previousDataDir;
+  await rm(dataDir, { recursive: true, force: true });
 }
 
 if (fails) { console.log(`\n${fails} assertion(s) failed.`); process.exit(1); }

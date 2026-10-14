@@ -253,6 +253,9 @@ jobs:
           ITAD_API_KEY: ${{ secrets.ITAD_API_KEY }}
           COUNTRY: ${{ vars.COUNTRY || 'US' }}
         run: |
+          node test/live-prices.test.mjs
+          node test/search-unowned.test.mjs
+          node test/config-wiring.test.mjs
           if ! node -e "import('playwright')" 2>/dev/null; then
             npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright
           fi

@@ -122,7 +122,8 @@ function net(mode, games = [{ id: 'g1', title: '007 First Light' }]) {
       return { ok: true, status: 200, json: async () => PRICED };
     }
     if (u.pathname.startsWith('/games/historylow/v1')) {
-      return { ok: true, status: 200, json: async () => [{ id: 'g1', low: { amount: 44.99, currency: 'USD', shop: { name: 'Fanatical' } } }] };
+      return { ok: true, status: 200, json: async () => [{ id: 'g1',
+        low: { price: { amount: 44.99, currency: 'USD' }, shop: { name: 'Fanatical' } } }] };
     }
     return { ok: false, status: 404, json: async () => ({}) };
   };
